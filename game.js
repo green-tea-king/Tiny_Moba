@@ -433,35 +433,161 @@ function drawBasePad(x, y, color, label) {
 function drawEntity(e) {
   const color = e.team === "blue" ? BLUE : RED;
   if (e.kind === "tower") {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(e.x - 16, e.y - 22, 32, 44, 5);
-    ctx.fill();
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(e.x - 5, e.y - 30, 10, 12);
+    drawTower(e, color);
   } else if (e.kind === "base") {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(e.x - 28, e.y - 26, 56, 52, 8);
-    ctx.fill();
-    ctx.fillStyle = "#f8fbff";
-    ctx.fillRect(e.x - 12, e.y - 34, 24, 10);
+    drawCastle(e, color);
+  } else if (e.kind === "player") {
+    drawPlayer(e, color);
+  } else if (e.kind === "hero") {
+    drawHero(e, color);
   } else {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
-    ctx.fill();
-    if (e.kind === "player") {
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    } else if (e.kind === "hero") {
-      ctx.strokeStyle = "#f6e49e";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+    drawMinion(e, color);
   }
   drawHealthBar(e);
+}
+
+function drawTower(e, color) {
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(e.x, e.y + 24, 23, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(e.x - 18, e.y - 12, 36, 38, 5);
+  ctx.fill();
+  ctx.fillStyle = "#eaf4ff";
+  ctx.fillRect(e.x - 12, e.y - 20, 24, 10);
+  ctx.fillRect(e.x - 4, e.y - 30, 8, 12);
+  ctx.strokeStyle = "#18212b";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(e.x, e.y - 8);
+  ctx.lineTo(e.x, e.y + 18);
+  ctx.stroke();
+  ctx.strokeStyle = e.team === "blue" ? "#9ccdff" : "#ffb6bb";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(e.x, e.y - 3, 10, Math.PI * 0.15, Math.PI * 0.85, true);
+  ctx.stroke();
+}
+
+function drawCastle(e, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(e.x - 30, e.y - 20, 60, 46, 6);
+  ctx.fill();
+  ctx.fillRect(e.x - 36, e.y - 8, 14, 34);
+  ctx.fillRect(e.x + 22, e.y - 8, 14, 34);
+
+  ctx.fillStyle = "#f8fbff";
+  ctx.fillRect(e.x - 30, e.y - 30, 10, 10);
+  ctx.fillRect(e.x - 5, e.y - 32, 10, 12);
+  ctx.fillRect(e.x + 20, e.y - 30, 10, 10);
+  ctx.fillStyle = "#17202a";
+  ctx.beginPath();
+  ctx.roundRect(e.x - 8, e.y + 3, 16, 23, 8);
+  ctx.fill();
+  ctx.fillStyle = e.team === "blue" ? "#9ccdff" : "#ffb6bb";
+  ctx.fillRect(e.x - 22, e.y - 4, 10, 10);
+  ctx.fillRect(e.x + 12, e.y - 4, 10, 10);
+}
+
+function drawMinion(e, color) {
+  const dir = e.team === "blue" ? -1 : 1;
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.beginPath();
+  ctx.ellipse(e.x, e.y + 11, 11, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#f1f6ff";
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(e.x, e.y - 2);
+  ctx.lineTo(e.x, e.y + 8);
+  ctx.moveTo(e.x, e.y + 2);
+  ctx.lineTo(e.x - 8, e.y + 7);
+  ctx.moveTo(e.x, e.y + 8);
+  ctx.lineTo(e.x - 5, e.y + 15);
+  ctx.moveTo(e.x, e.y + 8);
+  ctx.lineTo(e.x + 5, e.y + 15);
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(e.x, e.y - 8, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f8fbff";
+  ctx.fillRect(e.x - 5, e.y - 2, 10, 8);
+  ctx.strokeStyle = "#f6e49e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(e.x + 7, e.y + 3);
+  ctx.lineTo(e.x + 15, e.y + 3 + dir * 5);
+  ctx.stroke();
+}
+
+function drawHero(e, color) {
+  drawFighter(e, color, 1, "#f6e49e");
+}
+
+function drawPlayer(e, color) {
+  drawFighter(e, color, 1.16, "#ffffff");
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(e.x - 8, e.y - 23);
+  ctx.lineTo(e.x, e.y - 31);
+  ctx.lineTo(e.x + 8, e.y - 23);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#b9d8ff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(e.x, e.y, e.radius + 7, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawFighter(e, color, scale, accent) {
+  const dir = e.team === "blue" ? -1 : 1;
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(e.x, e.y + 17 * scale, 16 * scale, 5 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#f1f6ff";
+  ctx.lineWidth = 3.2 * scale;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(e.x, e.y - 4 * scale);
+  ctx.lineTo(e.x, e.y + 12 * scale);
+  ctx.moveTo(e.x, e.y + 1 * scale);
+  ctx.lineTo(e.x - 14 * scale, e.y + 8 * scale);
+  ctx.moveTo(e.x, e.y + 12 * scale);
+  ctx.lineTo(e.x - 8 * scale, e.y + 25 * scale);
+  ctx.moveTo(e.x, e.y + 12 * scale);
+  ctx.lineTo(e.x + 8 * scale, e.y + 25 * scale);
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(e.x, e.y - 16 * scale, 8 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(e.x - 9 * scale, e.y - 2 * scale, 18 * scale, 18 * scale, 4 * scale);
+  ctx.fill();
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 3 * scale;
+  ctx.beginPath();
+  ctx.moveTo(e.x + 10 * scale, e.y + 1 * scale);
+  ctx.lineTo(e.x + 23 * scale, e.y - 10 * dir * scale);
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.roundRect(e.x - 24 * scale, e.y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
+  ctx.fill();
 }
 
 function drawHealthBar(e) {
