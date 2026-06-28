@@ -37,7 +37,6 @@ const state = {
   effects: [],
   texts: [],
   targetHint: null,
-  shake: 0,
   nextId: 1,
 };
 
@@ -207,7 +206,6 @@ function init() {
   state.effects = [];
   state.texts = [];
   state.targetHint = null;
-  state.shake = 0;
   state.nextId = 1;
   state.gameOver = false;
   state.winner = null;
@@ -316,8 +314,6 @@ function update(dt) {
   state.time += dt;
   state.waveTimer += dt;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
-  state.shake = Math.max(0, state.shake - dt * 22);
-
   updatePlayerTargetHint();
 
   if (state.waveTimer >= 8) {
@@ -446,7 +442,6 @@ function attack(attacker, target) {
   addAttackEffect(attacker, target);
   addHit(target.x, target.y, attacker.team);
   addFloatingText(target.x, target.y - target.radius - 12, `-${damage}`, attacker.team === "blue" ? "#b9d8ff" : "#ffd0d0");
-  state.shake = Math.max(state.shake, attacker.kind === "tower" ? 3.8 : attacker.kind === "player" ? 2.4 : 1.4);
   if (target.hp <= 0) kill(target, attacker);
   return true;
 }
@@ -575,11 +570,6 @@ function addBurst(x, y, color) {
 function draw() {
   ctx.clearRect(0, 0, W, H);
   ctx.save();
-  if (state.shake > 0) {
-    const sx = Math.sin(state.time * 91) * state.shake;
-    const sy = Math.cos(state.time * 73) * state.shake;
-    ctx.translate(sx, sy);
-  }
   drawMap();
   const sorted = [...state.entities].sort((a, b) => a.y - b.y);
   drawTargetHint();
