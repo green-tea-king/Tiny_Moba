@@ -539,7 +539,8 @@ function addAttackEffect(attacker, target) {
   const dy = target.y - attacker.y;
   const angle = Math.atan2(dy, dx);
   const hasBow = attacker.kind === "player" && hasEquipped(attacker, "bow");
-  const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "minion" ? "stab" : "slash";
+  const hasSword = attacker.kind === "player" && hasEquipped(attacker, "sword");
+  const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "player" && !hasSword ? "punch" : attacker.kind === "minion" ? "stab" : "slash";
   state.effects.push({
     type: kind,
     team: attacker.team,
@@ -549,9 +550,9 @@ function addAttackEffect(attacker, target) {
     y2: target.y,
     angle,
     color,
-    life: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : 0.18,
-    duration: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : 0.18,
-    width: attacker.kind === "tower" ? 7 : attacker.kind === "player" ? 6 : 4,
+    life: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : kind === "punch" ? 0.16 : 0.18,
+    duration: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : kind === "punch" ? 0.16 : 0.18,
+    width: attacker.kind === "tower" ? 7 : kind === "punch" ? 4 : attacker.kind === "player" ? 6 : 4,
   });
 }
 
@@ -672,6 +673,23 @@ function drawAttackEffects() {
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(0, 0, 17 + t * 7, -0.8, 0.8);
+      ctx.stroke();
+    } else if (effect.type === "punch") {
+      const impactX = effect.x2 - Math.cos(effect.angle) * 8;
+      const impactY = effect.y2 - Math.sin(effect.angle) * 8;
+      ctx.translate(impactX, impactY);
+      ctx.rotate(effect.angle);
+      ctx.strokeStyle = effect.color;
+      ctx.lineWidth = effect.width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-14, 0);
+      ctx.lineTo(2 + t * 10, 0);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.72)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(5, 0, 8 + t * 8, 0, Math.PI * 2);
       ctx.stroke();
     } else {
       const mx = effect.x1 + (effect.x2 - effect.x1) * t;
@@ -938,6 +956,8 @@ function drawFighter(e, color, scale, accent) {
   const x = pose.x;
   const y = pose.y;
   const hasBow = e.kind === "player" && hasEquipped(e, "bow");
+  const hasSword = e.kind !== "player" || hasEquipped(e, "sword");
+  const isUnarmed = e.kind === "player" && !hasBow && !hasSword;
   const handX = x + 10 * scale + e.faceX * pose.strike * 5 * scale;
   const handY = y + 1 * scale + e.faceY * pose.strike * 5 * scale;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
@@ -996,7 +1016,7 @@ function drawFighter(e, color, scale, accent) {
       ctx.lineTo(handX + e.faceX * 20 * scale, handY + e.faceY * 20 * scale);
       ctx.stroke();
     }
-  } else {
+  } else if (hasSword) {
     const reach = 24 * scale + pose.strike * 12 * scale;
     ctx.beginPath();
     ctx.moveTo(handX, handY);
@@ -1010,12 +1030,36 @@ function drawFighter(e, color, scale, accent) {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+  } else {
+    const punchX = handX + e.faceX * (7 + pose.strike * 10) * scale;
+    const punchY = handY + e.faceY * (7 + pose.strike * 10) * scale;
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = "#f8fbff";
+    ctx.beginPath();
+    ctx.arc(punchX, punchY, 4.5 * scale + pose.strike * 1.5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    if (pose.strike > 0.2) {
+      ctx.globalAlpha = 0.45 * pose.strike;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.2 * scale;
+      ctx.beginPath();
+      ctx.arc(punchX + e.faceX * 4 * scale, punchY + e.faceY * 4 * scale, 8 * scale + pose.strike * 5 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
   ctx.shadowBlur = 0;
-  ctx.fillStyle = accent;
-  ctx.beginPath();
-  ctx.roundRect(x - 24 * scale, y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
-  ctx.fill();
+  if (!isUnarmed) {
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.roundRect(x - 24 * scale, y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = "#f8fbff";
+    ctx.beginPath();
+    ctx.arc(x - 14 * scale, y + 8 * scale, 4 * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
   drawHurtFlash(x, y + 2 * scale, 22 * scale, pose.hurt);
 }
 
