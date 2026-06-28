@@ -6,7 +6,14 @@ const attackButton = document.getElementById("attack-button");
 const shopButton = document.getElementById("shop-button");
 const shopPanel = document.getElementById("shop-panel");
 const closeShop = document.getElementById("close-shop");
+const shopSlotsEl = document.getElementById("shop-slots");
 const shopItemsEl = document.getElementById("shop-items");
+const perkPanel = document.getElementById("perk-panel");
+const perkItemsEl = document.getElementById("perk-items");
+const startScreen = document.getElementById("start-screen");
+const playerNameInput = document.getElementById("player-name");
+const randomNameButton = document.getElementById("random-name");
+const startGameButton = document.getElementById("start-game");
 
 const W = 390;
 const H = 844;
@@ -22,6 +29,20 @@ const BLUE = "#2f80ed";
 const RED = "#e5484d";
 const GOLD = "#f3b63a";
 const BG = "#243529";
+const GAME_NAME = "TinyMoba";
+const GAME_VERSION = "0.4.0";
+
+const SAFE_NAME_PREFIXES = ["晨星", "松影", "流火", "青嵐", "銀角", "雲槍", "夜潮", "蒼牙"];
+const SAFE_NAME_SUFFIXES = ["旅人", "獵手", "守望者", "先鋒", "疾風", "行者", "巡林者", "破曉"];
+
+const roguePerks = [
+  { id: "atk", name: "狂戰印記", text: "ATK（攻擊力）+6", apply: p => (p.atk += 6) },
+  { id: "speed", name: "風行步", text: "Move Speed（移動速度）+10%", apply: p => (p.speed *= 1.1) },
+  { id: "range", name: "獵手視野", text: "Range（攻擊距離）+26", apply: p => (p.range += 26) },
+  { id: "def", name: "石膚", text: "DEF（防禦）+3", apply: p => (p.def += 3) },
+  { id: "haste", name: "疾攻", text: "Attack Rate（攻擊頻率）更快 12%", apply: p => (p.attackRate *= 0.88) },
+  { id: "vital", name: "生命織線", text: "HP（生命值）上限 +55", apply: p => { p.maxHp += 55; p.hp += 55; } },
+];
 
 const state = {
   time: 0,
@@ -38,6 +59,12 @@ const state = {
   texts: [],
   targetHint: null,
   nextId: 1,
+  started: false,
+  playerName: "",
+  shopSlot: "weapon",
+  perkChoices: [],
+  choiceOpen: false,
+  waveNumber: 0,
 };
 
 const equipmentSlots = [
@@ -156,6 +183,14 @@ function hasMeleeWeapon(entity) {
   return hasEquipped(entity, "sword") || hasEquipped(entity, "vampire-sword");
 }
 
+function isRangedStyle(entity) {
+  return entity.kind === "player" ? hasRangedWeapon(entity) : entity.weaponStyle === "ranged";
+}
+
+function isMeleeWeaponStyle(entity) {
+  return entity.kind === "player" ? hasMeleeWeapon(entity) : entity.weaponStyle === "melee";
+}
+
 function getItem(itemId) {
   return items.find(item => item.id === itemId);
 }
@@ -237,6 +272,7 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
     expNeed: 60,
     gold: 0,
     items: {},
+    itemLevels: {},
     lifesteal: 0,
     fireBow: false,
     burnTime: 0,
@@ -245,6 +281,9 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
     guardianArmor: false,
     guardianReady: false,
     shield: 0,
+    weaponStyle: "unarmed",
+    minionType: "",
+    superLane: false,
   };
   return Object.assign(base, stats);
 }
@@ -260,6 +299,10 @@ function init() {
   state.winner = null;
   state.waveTimer = 0;
   state.time = 0;
+  state.waveNumber = 0;
+  state.choiceOpen = false;
+  state.perkChoices = [];
+  state.shopSlot = "weapon";
 
   state.redBase = makeEntity("base", "red", 1, W / 2, 44, {
     radius: 30, hp: 1200, maxHp: 1200, atk: 0, range: 0, speed: 0,
@@ -287,6 +330,7 @@ function init() {
   state.entities.push(makeHero("blue", 0), makeHero("blue", 2));
   state.entities.push(makeHero("red", 0), makeHero("red", 1), makeHero("red", 2));
   spawnWave();
+  renderShopSlots();
   renderShop();
   showMessage("藍方出擊：用搖桿移動，攻擊鍵打最近敵人");
 }
@@ -295,27 +339,55 @@ function makeHero(team, laneIndex) {
   const lane = LANES[laneIndex];
   return makeEntity("hero", team, laneIndex, lane.x, team === "blue" ? 628 : 92, {
     radius: 14, hp: 250, maxHp: 250, atk: 18, def: 2, range: 46, attackRate: 0.88,
-    speed: 98, rewardGold: 120, rewardExp: 90,
+    speed: 98, rewardGold: 120, rewardExp: 90, weaponStyle: "unarmed",
   });
 }
 
-function spawnMinion(team, laneIndex, offset) {
+function lanePressureFor(team, laneIndex) {
+  const enemyTeam = team === "blue" ? "red" : "blue";
+  const enemyTowerDown = !state.entities.some(e => !e.dead && e.team === enemyTeam && e.kind === "tower" && e.laneIndex === laneIndex);
+  return {
+    waveScale: 1 + Math.floor(state.waveNumber / 4) * 0.12,
+    superLane: enemyTowerDown,
+    extraUnits: Math.floor(state.waveNumber / 6),
+  };
+}
+
+function spawnMinion(team, laneIndex, offset, minionType, pressure) {
   const lane = LANES[laneIndex];
   const y = team === "blue" ? 686 + offset : 66 - offset;
+  const scale = pressure.waveScale * (pressure.superLane ? 1.28 : 1);
+  const isSnake = minionType === "snake";
   state.entities.push(makeEntity("minion", team, laneIndex, lane.x + offset * 0.9, y, {
-    radius: 9, hp: 76, maxHp: 76, atk: 7, def: 0, range: 24, attackRate: 1,
-    speed: 62, rewardGold: 14, rewardExp: 18,
+    radius: isSnake ? 10 : 11,
+    hp: Math.round((isSnake ? 84 : 98) * scale),
+    maxHp: Math.round((isSnake ? 84 : 98) * scale),
+    atk: Math.round((isSnake ? 9 : 8) * scale),
+    def: isSnake ? 0 : 1,
+    range: isSnake ? 104 : 22,
+    attackRate: isSnake ? 1.15 : 0.95,
+    speed: isSnake ? 56 : 68,
+    rewardGold: Math.round((isSnake ? 18 : 15) * scale),
+    rewardExp: Math.round((isSnake ? 22 : 18) * scale),
+    weaponStyle: isSnake ? "ranged" : "unarmed",
+    minionType,
+    superLane: pressure.superLane,
   }));
 }
 
 function spawnWave() {
+  state.waveNumber += 1;
   LANES.forEach((_, laneIndex) => {
-    [-12, 0, 12].forEach(offset => {
-      spawnMinion("blue", laneIndex, offset);
-      spawnMinion("red", laneIndex, offset);
-    });
+    const bluePressure = lanePressureFor("blue", laneIndex);
+    const redPressure = lanePressureFor("red", laneIndex);
+    [-14, 10].forEach(offset => spawnMinion("blue", laneIndex, offset, "dog", bluePressure));
+    [-14, 10].forEach(offset => spawnMinion("red", laneIndex, offset, "dog", redPressure));
+    spawnMinion("blue", laneIndex, 28, "snake", bluePressure);
+    spawnMinion("red", laneIndex, 28, "snake", redPressure);
+    for (let i = 0; i < bluePressure.extraUnits; i += 1) spawnMinion("blue", laneIndex, 42 + i * 10, "dog", bluePressure);
+    for (let i = 0; i < redPressure.extraUnits; i += 1) spawnMinion("red", laneIndex, 42 + i * 10, "dog", redPressure);
   });
-  showMessage("三路小兵出發");
+  showMessage(`第 ${state.waveNumber} 波小兵出發`);
 }
 
 function showMessage(text) {
@@ -355,6 +427,7 @@ function nearestTowerOrBase(team, laneIndex) {
 }
 
 function update(dt) {
+  if (!state.started || state.choiceOpen) return;
   if (state.gameOver) {
     state.messageTimer = Math.max(1, state.messageTimer);
     return;
@@ -442,15 +515,36 @@ function noEnemyTowerAhead(entity) {
   });
 }
 
+function alliedMinionFront(entity) {
+  const allies = state.entities.filter(e => !e.dead && e.team === entity.team && e.kind === "minion" && e.laneIndex === entity.laneIndex);
+  if (!allies.length) return null;
+  allies.sort((a, b) => entity.team === "blue" ? a.y - b.y : b.y - a.y);
+  return allies[0];
+}
+
+function pickHeroTarget(entity) {
+  const enemyTeam = entity.team === "blue" ? "red" : "blue";
+  const nearby = state.entities.filter(e => !e.dead && e.team === enemyTeam && dist(entity, e) <= entity.range + 42 && (e.kind !== "base" || noEnemyTowerAhead(entity)));
+  if (!nearby.length) return null;
+  nearby.sort((a, b) => {
+    const aScore = (a.hp / a.maxHp) + (a.kind === "player" ? -0.18 : 0) + (a.kind === "tower" ? 0.35 : 0);
+    const bScore = (b.hp / b.maxHp) + (b.kind === "player" ? -0.18 : 0) + (b.kind === "tower" ? 0.35 : 0);
+    return aScore - bScore;
+  });
+  return nearby[0];
+}
+
 function updateHero(entity, dt) {
   const lowHp = entity.hp / entity.maxHp < 0.26;
   const homeY = entity.team === "blue" ? 636 : 92;
-  if (lowHp) {
-    moveToward(entity, LANES[entity.laneIndex].x, homeY, dt, entity.speed * 1.15);
+  const alliedFront = alliedMinionFront(entity);
+  const underFocus = state.entities.filter(e => !e.dead && e.team !== entity.team && dist(entity, e) < 118 && (e.kind === "hero" || e.kind === "player")).length >= 2;
+  if (lowHp || underFocus) {
+    moveToward(entity, LANES[entity.laneIndex].x, homeY, dt, entity.speed * 1.2);
     return;
   }
 
-  const target = nearestEnemy(entity, entity.range + 12, e => e.kind !== "base" || noEnemyTowerAhead(entity));
+  const target = pickHeroTarget(entity) || nearestEnemy(entity, entity.range + 12, e => e.kind !== "base" || noEnemyTowerAhead(entity));
   if (target) {
     attack(entity, target);
     return;
@@ -458,8 +552,13 @@ function updateHero(entity, dt) {
 
   const objective = nearestTowerOrBase(entity.team, entity.laneIndex);
   if (objective) {
-    if (dist(entity, objective) <= entity.range + objective.radius) attack(entity, objective);
-    else moveToward(entity, objective.x, objective.y, dt, entity.speed);
+    if (alliedFront && dist(entity, alliedFront) > 68) {
+      moveToward(entity, alliedFront.x, alliedFront.y + (entity.team === "blue" ? 26 : -26), dt, entity.speed);
+    } else if (dist(entity, objective) <= entity.range + objective.radius) {
+      attack(entity, objective);
+    } else {
+      moveToward(entity, objective.x, objective.y, dt, entity.speed);
+    }
   }
 }
 
@@ -546,7 +645,7 @@ function attack(attacker, target) {
     attacker.hp = Math.min(attacker.maxHp, attacker.hp + heal);
     addFloatingText(attacker.x, attacker.y - attacker.radius - 20, `+${heal}`, "#8ff0b2", 0.9);
   }
-  if (attacker.kind === "player" && attacker.fireBow) {
+  if ((attacker.kind === "player" && attacker.fireBow) || (attacker.kind === "minion" && attacker.minionType === "snake")) {
     target.burnTime = 2.6;
     target.burnTick = Math.min(target.burnTick || 0, 0.18);
     target.burnSourceId = attacker.id;
@@ -645,6 +744,31 @@ function levelUp() {
   p.def += 1;
   showMessage(`升級到 Lv.${p.level}：HP、ATK、DEF 提升`);
   addFloatingText(p.x, p.y - 50, `LEVEL ${p.level}`, "#f6e49e", 1.2);
+  if (p.level % 2 === 0) openPerkDraft();
+}
+
+function openPerkDraft() {
+  const pool = [...roguePerks].sort(() => Math.random() - 0.5);
+  state.perkChoices = pool.slice(0, 3);
+  state.choiceOpen = true;
+  perkItemsEl.innerHTML = "";
+  for (const perk of state.perkChoices) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "perk-card";
+    button.innerHTML = `<strong>${perk.name}</strong><span>${perk.text}</span>`;
+    button.addEventListener("click", () => choosePerk(perk));
+    perkItemsEl.append(button);
+  }
+  perkPanel.classList.add("open");
+}
+
+function choosePerk(perk) {
+  perk.apply(state.player);
+  state.choiceOpen = false;
+  state.perkChoices = [];
+  perkPanel.classList.remove("open");
+  showMessage(`獲得 ${perk.name}`);
 }
 
 function respawnHero(hero) {
@@ -694,9 +818,9 @@ function addAttackEffect(attacker, target) {
   const dx = target.x - attacker.x;
   const dy = target.y - attacker.y;
   const angle = Math.atan2(dy, dx);
-  const hasBow = attacker.kind === "player" && hasRangedWeapon(attacker);
-  const hasSword = attacker.kind === "player" && hasMeleeWeapon(attacker);
-  const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "player" && !hasSword ? "punch" : attacker.kind === "minion" ? "stab" : "slash";
+  const hasBow = isRangedStyle(attacker);
+  const hasSword = isMeleeWeaponStyle(attacker);
+  const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : !hasSword ? "punch" : attacker.kind === "minion" ? "stab" : "slash";
   state.effects.push({
     type: kind,
     team: attacker.team,
@@ -1061,49 +1185,72 @@ function drawMinion(e, color) {
   const pose = getMotionPose(e, 8, 1.6, 7, 5);
   const x = pose.x;
   const y = pose.y;
-  const reach = 14 + pose.strike * 11;
-  const handX = x + 7;
-  const handY = y + 3;
+  const isSnake = e.minionType === "snake";
+  const reach = isSnake ? 18 + pose.strike * 12 : 14 + pose.strike * 11;
+  const handX = x + (isSnake ? 10 : 7);
+  const handY = y + (isSnake ? 0 : 3);
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
   ctx.ellipse(x, e.y + 11, 11, 4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "#f1f6ff";
-  ctx.lineWidth = 2.4;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(x, y - 2);
-  ctx.lineTo(x, y + 8);
-  ctx.moveTo(x, y + 2);
-  ctx.lineTo(x - 8, y + 7);
-  ctx.moveTo(x, y + 8);
-  ctx.lineTo(x - 5, y + 15);
-  ctx.moveTo(x, y + 8);
-  ctx.lineTo(x + 5, y + 15);
-  ctx.stroke();
-
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y - 8, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#f8fbff";
-  ctx.fillRect(x - 5, y - 2, 10, 8);
-  ctx.strokeStyle = "#f6e49e";
-  ctx.lineWidth = 2 + pose.strike * 1.2;
-  ctx.beginPath();
-  ctx.moveTo(handX, handY);
-  ctx.lineTo(handX + e.faceX * reach, handY + e.faceY * reach);
-  ctx.stroke();
-  if (pose.strike > 0.25) {
-    ctx.globalAlpha = 0.55 * pose.strike;
-    ctx.strokeStyle = e.team === "blue" ? "#b9d8ff" : "#ffd0d0";
-    ctx.lineWidth = 1.5;
+  if (isSnake) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = e.superLane ? 4.6 : 3.6;
     ctx.beginPath();
-    ctx.moveTo(handX + e.faceX * (reach - 8), handY + e.faceY * (reach - 8));
-    ctx.lineTo(handX + e.faceX * (reach + 5), handY + e.faceY * (reach + 5));
+    ctx.moveTo(x - 12, y + 10);
+    ctx.quadraticCurveTo(x - 2, y - 6, x + 8, y + 2);
+    ctx.quadraticCurveTo(x + 16, y + 8, x + 8, y + 18);
     ctx.stroke();
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x + 6, y - 2, 10, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f3ffd1";
+    ctx.fillRect(x + 8, y - 5, 2, 2);
+    ctx.fillRect(x + 14, y - 5, 2, 2);
+    ctx.strokeStyle = "#9cf870";
+    ctx.lineWidth = 2 + pose.strike;
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(handX + e.faceX * reach, handY + e.faceY * reach);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = "#f1f6ff";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, y - 2);
+    ctx.lineTo(x, y + 8);
+    ctx.moveTo(x, y + 2);
+    ctx.lineTo(x - 8, y + 7);
+    ctx.moveTo(x, y + 8);
+    ctx.lineTo(x - 5, y + 15);
+    ctx.moveTo(x, y + 8);
+    ctx.lineTo(x + 5, y + 15);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y - 8, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f8fbff";
+    ctx.fillRect(x - 5, y - 2, 10, 8);
+    const pawX = handX + e.faceX * reach;
+    const pawY = handY + e.faceY * reach;
+    ctx.fillStyle = "#f8fbff";
+    ctx.beginPath();
+    ctx.arc(pawX, pawY, 3.8 + pose.strike * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+    if (pose.strike > 0.25) {
+      ctx.globalAlpha = 0.55 * pose.strike;
+      ctx.strokeStyle = e.team === "blue" ? "#b9d8ff" : "#ffd0d0";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(pawX + e.faceX * 3, pawY + e.faceY * 3, 7 + pose.strike * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
   drawHurtFlash(x, y + 2, 17, pose.hurt);
 }
@@ -1133,9 +1280,9 @@ function drawFighter(e, color, scale, accent) {
   const pose = getMotionPose(e, 6, 1.2, 10 * scale, 6 * scale);
   const x = pose.x;
   const y = pose.y;
-  const hasBow = e.kind === "player" && hasRangedWeapon(e);
-  const hasSword = e.kind !== "player" || hasMeleeWeapon(e);
-  const isUnarmed = e.kind === "player" && !hasBow && !hasSword;
+  const hasBow = isRangedStyle(e);
+  const hasSword = isMeleeWeaponStyle(e);
+  const isUnarmed = !hasBow && !hasSword;
   const weaponItem = e.kind === "player" ? getEquippedItem(e, "weapon") : null;
   const hatItem = e.kind === "player" ? getEquippedItem(e, "hat") : null;
   const clothesItem = e.kind === "player" ? getEquippedItem(e, "clothes") : null;
@@ -1341,6 +1488,14 @@ function drawHud() {
   drawBar(190, 16, 84, 9, p.dead ? 0 : p.hp / p.maxHp, p.dead ? "#ff8085" : "#65aefb");
   drawBar(190, 38, 84, 9, p.exp / p.expNeed, GOLD);
 
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f2f4f7";
+  ctx.font = "800 14px system-ui";
+  ctx.fillText(`${GAME_NAME} v${GAME_VERSION}`, W / 2, 20);
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.font = "700 11px system-ui";
+  ctx.fillText(`${state.playerName}  |  Wave ${state.waveNumber}`, W / 2, 38);
+
   ctx.textAlign = "right";
   ctx.fillStyle = "#ffb6bb";
   ctx.fillText(`紅堡 ${Math.max(0, Math.ceil(state.redBase.hp))}`, W - 14, 24);
@@ -1407,7 +1562,7 @@ function drawInventory(player) {
       ctx.fillText(item.icon, x + size / 2, y + 22);
       ctx.fillStyle = "rgba(255,255,255,0.72)";
       ctx.font = "700 9px system-ui";
-      ctx.fillText(item.name.slice(0, 2), x + size / 2, y + 43);
+      ctx.fillText(`L${getItemLevel(player, slot.id)}`, x + size / 2, y + 43);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.3)";
       ctx.font = "800 15px system-ui";
@@ -1437,17 +1592,77 @@ function drawGameOver() {
   ctx.fillText("重新整理頁面可再玩一次", W / 2, H / 2 + 20);
 }
 
+function getItemLevel(player, slotId) {
+  return player.itemLevels[slotId] || 0;
+}
+
+function getItemCost(item, level) {
+  return Math.round(item.cost * (1 + (level - 1) * 0.55));
+}
+
+function applyItemUpgrade(player, item) {
+  if (item.id === "sword") player.atk += 6;
+  if (item.id === "bow") { player.atk += 3; player.range += 18; }
+  if (item.id === "vampire-sword") { player.atk += 5; player.lifesteal += 0.07; }
+  if (item.id === "fire-bow") { player.atk += 4; player.range += 14; }
+  if (item.id === "hat") { player.maxHp += 24; player.hp += 24; }
+  if (item.id === "guardian-armor") player.def += 3;
+  if (item.id === "boots") player.speed *= 1.07;
+}
+
+function removeItemUpgrade(player, item) {
+  if (item.id === "sword") player.atk -= 6;
+  if (item.id === "bow") { player.atk -= 3; player.range -= 18; }
+  if (item.id === "vampire-sword") { player.atk -= 5; player.lifesteal -= 0.07; }
+  if (item.id === "fire-bow") { player.atk -= 4; player.range -= 14; }
+  if (item.id === "hat") { player.maxHp -= 24; player.hp = Math.min(player.hp, player.maxHp); }
+  if (item.id === "guardian-armor") player.def -= 3;
+  if (item.id === "boots") player.speed /= 1.07;
+}
+
+function removeItemFull(player, item, level) {
+  for (let i = level; i > 1; i -= 1) removeItemUpgrade(player, item);
+  item.remove(player);
+}
+
+function applyItemFull(player, item, level) {
+  item.apply(player);
+  for (let i = 2; i <= level; i += 1) applyItemUpgrade(player, item);
+}
+
+function renderShopSlots() {
+  shopSlotsEl.innerHTML = "";
+  for (const slot of equipmentSlots) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `slot-filter${state.shopSlot === slot.id ? " active" : ""}`;
+    button.textContent = slot.label;
+    button.addEventListener("click", () => {
+      state.shopSlot = slot.id;
+      renderShopSlots();
+      renderShop();
+    });
+    shopSlotsEl.append(button);
+  }
+}
+
 function renderShop() {
   shopItemsEl.innerHTML = "";
-  for (const item of items) {
+  const p = state.player;
+  const filteredItems = items.filter(item => item.slot === state.shopSlot);
+  for (const item of filteredItems) {
+    const isSameItem = p.items[item.slot] === item.id;
+    const currentLevel = isSameItem ? getItemLevel(p, item.slot) : 0;
+    const nextLevel = currentLevel + 1;
+    const cost = getItemCost(item, nextLevel);
     const row = document.createElement("div");
     row.className = "shop-item";
     const info = document.createElement("div");
-    info.innerHTML = `<strong>${item.icon} ${item.name}</strong><br><small>${item.type} / ${item.text} / ${item.cost} Gold（金錢）</small>`;
+    info.innerHTML = `<strong>${item.icon} ${item.name}${currentLevel > 0 ? ` Lv.${currentLevel}` : ""}</strong><br><small>${item.type} / ${item.text} / NEXT LV ${nextLevel} / ${cost} Gold（金錢）</small>`;
     const button = document.createElement("button");
     button.className = "buy-button";
     button.type = "button";
-    button.textContent = "購買";
+    button.textContent = currentLevel > 0 ? "NEXT LV" : "購買";
     button.addEventListener("click", () => buyItem(item));
     row.append(info, button);
     shopItemsEl.append(row);
@@ -1456,16 +1671,23 @@ function renderShop() {
 
 function buyItem(item) {
   const p = state.player;
-  if (p.gold < item.cost) {
+  const sameItem = p.items[item.slot] === item.id;
+  const oldItem = getItem(p.items[item.slot]);
+  const oldLevel = getItemLevel(p, item.slot);
+  const nextLevel = sameItem ? oldLevel + 1 : 1;
+  const cost = getItemCost(item, nextLevel);
+  if (p.gold < cost) {
     showMessage("Gold（金錢）不足");
     return;
   }
-  const oldItem = getItem(p.items[item.slot]);
-  p.gold -= item.cost;
-  if (oldItem && oldItem.remove) oldItem.remove(p);
+  p.gold -= cost;
+  if (!sameItem && oldItem) removeItemFull(p, oldItem, oldLevel);
   p.items[item.slot] = item.id;
-  item.apply(p);
-  showMessage(oldItem ? `已替換 ${oldItem.name} -> ${item.name}` : `已裝備 ${item.name}`);
+  p.itemLevels[item.slot] = nextLevel;
+  if (sameItem) applyItemUpgrade(p, item);
+  else applyItemFull(p, item, 1);
+  renderShop();
+  showMessage(sameItem ? `${item.name} 升到 Lv.${nextLevel}` : oldItem ? `已替換 ${oldItem.name} -> ${item.name}` : `已裝備 ${item.name}`);
 }
 
 function resizeCanvas() {
@@ -1497,6 +1719,26 @@ function resetStick() {
   stickThumb.style.transform = "translate(0, 0)";
 }
 
+function randomSafeName() {
+  return `${SAFE_NAME_PREFIXES[Math.floor(Math.random() * SAFE_NAME_PREFIXES.length)]}${SAFE_NAME_SUFFIXES[Math.floor(Math.random() * SAFE_NAME_SUFFIXES.length)]}`;
+}
+
+function sanitizePlayerName(input) {
+  const cleaned = (input || "").replace(/\s+/g, "").slice(0, 16);
+  if (!cleaned) return randomSafeName();
+  if (/(fuck|shit|bitch|幹|智障|白痴|垃圾|廢物|色情|性愛)/i.test(cleaned)) return randomSafeName();
+  return cleaned;
+}
+
+function startGame() {
+  state.playerName = sanitizePlayerName(playerNameInput.value);
+  playerNameInput.value = state.playerName;
+  state.started = true;
+  startScreen.style.display = "none";
+  perkPanel.classList.remove("open");
+  init();
+}
+
 joystick.addEventListener("pointerdown", e => {
   joystick.setPointerCapture(e.pointerId);
   setStick(e.clientX, e.clientY);
@@ -1510,8 +1752,18 @@ joystick.addEventListener("pointerup", e => {
 });
 joystick.addEventListener("pointercancel", resetStick);
 attackButton.addEventListener("pointerdown", playerAttack);
-shopButton.addEventListener("click", () => shopPanel.classList.toggle("open"));
+shopButton.addEventListener("click", () => {
+  if (!state.started || state.choiceOpen) return;
+  shopPanel.classList.toggle("open");
+});
 closeShop.addEventListener("click", () => shopPanel.classList.remove("open"));
+randomNameButton.addEventListener("click", () => {
+  playerNameInput.value = randomSafeName();
+});
+startGameButton.addEventListener("click", startGame);
+playerNameInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") startGame();
+});
 window.addEventListener("resize", resizeCanvas);
 
 function frame(now) {
@@ -1537,5 +1789,6 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 
 resizeCanvas();
 init();
+playerNameInput.value = randomSafeName();
 window.__mobaState = state;
 requestAnimationFrame(frame);

@@ -4,11 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>TinyMoba</title>
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=8b8a4e1" />
-    <link rel="stylesheet" href="./styles.css?v=8b8a4e1" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=0.4.0" />
+    <link rel="stylesheet" href="./styles.css?v=0.4.0" />
   </head>
   <body>
     <main id="game-shell" aria-label="TinyMoba">
+      <section id="start-screen" aria-label="開始畫面">
+        <div class="start-backdrop"></div>
+        <div class="start-panel">
+          <p class="start-kicker">Three Lane Roguelike MOBA</p>
+          <h1>TinyMoba</h1>
+          <p class="start-copy">三路推塔、局內成長、隨機強化。</p>
+          <label class="name-field" for="player-name">使用者名稱</label>
+          <div class="name-row">
+            <input id="player-name" type="text" maxlength="16" autocomplete="off" />
+            <button id="random-name" type="button">亂數</button>
+          </div>
+          <button id="start-game" class="start-button" type="button">開始對戰</button>
+        </div>
+      </section>
       <canvas id="game" width="390" height="844"></canvas>
       <div id="touch-ui">
         <div id="joystick" class="stick-zone" aria-label="移動搖桿">
@@ -23,9 +37,16 @@
           <strong>商店</strong>
           <button id="close-shop" type="button">關閉</button>
         </header>
+        <div id="shop-slots" class="shop-slots"></div>
         <div id="shop-items"></div>
       </section>
+      <section id="perk-panel" aria-label="肉鴿選擇">
+        <header>
+          <strong>成長選擇</strong>
+        </header>
+        <div id="perk-items" class="perk-items"></div>
+      </section>
     </main>
-    <script src="./game.js?v=8b8a4e1"></script>
+    <script src="./game.js?v=0.4.0"></script>
   </body>
 </html>
