@@ -41,12 +41,74 @@ const state = {
   nextId: 1,
 };
 
+const equipmentSlots = [
+  { id: "weapon", label: "武器" },
+  { id: "hat", label: "帽子" },
+  { id: "clothes", label: "衣服" },
+  { id: "shoes", label: "鞋子" },
+];
+
 const items = [
-  { id: "sword", icon: "劍", color: "#f6e49e", name: "短劍", cost: 100, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
-  { id: "bow", icon: "弓", color: "#d8b36a", name: "弓箭", cost: 135, text: "Range（攻擊距離）+95 / ATK +4", apply: p => { p.range += 95; p.atk += 4; } },
-  { id: "armor", icon: "甲", color: "#9ccdff", name: "護甲", cost: 120, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
-  { id: "boots", icon: "靴", color: "#bdf2a0", name: "靴子", cost: 95, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
-  { id: "stone", icon: "心", color: "#ff9aa2", name: "生命石", cost: 145, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
+  {
+    id: "sword",
+    slot: "weapon",
+    type: "短距離武器",
+    icon: "劍",
+    color: "#f6e49e",
+    name: "短劍",
+    cost: 100,
+    text: "短距離 / ATK（攻擊力）+10",
+    apply: p => (p.atk += 10),
+    remove: p => (p.atk -= 10),
+  },
+  {
+    id: "bow",
+    slot: "weapon",
+    type: "長距離武器",
+    icon: "弓",
+    color: "#d8b36a",
+    name: "弓箭",
+    cost: 135,
+    text: "長距離 / Range（攻擊距離）+95 / ATK +4",
+    apply: p => { p.range += 95; p.atk += 4; },
+    remove: p => { p.range -= 95; p.atk -= 4; },
+  },
+  {
+    id: "hat",
+    slot: "hat",
+    type: "帽子",
+    icon: "帽",
+    color: "#f0b6ff",
+    name: "戰帽",
+    cost: 115,
+    text: "HP（生命值）上限 +45 / DEF（防禦）+1",
+    apply: p => { p.maxHp += 45; p.hp += 45; p.def += 1; },
+    remove: p => { p.maxHp -= 45; p.hp = Math.min(p.hp, p.maxHp); p.def -= 1; },
+  },
+  {
+    id: "armor",
+    slot: "clothes",
+    type: "衣服",
+    icon: "衣",
+    color: "#9ccdff",
+    name: "戰衣",
+    cost: 120,
+    text: "DEF（防禦）+5",
+    apply: p => (p.def += 5),
+    remove: p => (p.def -= 5),
+  },
+  {
+    id: "boots",
+    slot: "shoes",
+    type: "鞋子",
+    icon: "靴",
+    color: "#bdf2a0",
+    name: "靴子",
+    cost: 95,
+    text: "Move Speed（移動速度）+15%",
+    apply: p => (p.speed *= 1.15),
+    remove: p => (p.speed /= 1.15),
+  },
 ];
 
 function clamp(value, min, max) {
@@ -55,6 +117,16 @@ function clamp(value, min, max) {
 
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function hasEquipped(entity, itemId) {
+  if (!entity.items) return false;
+  if (Array.isArray(entity.items)) return entity.items.includes(itemId);
+  return Object.values(entity.items).includes(itemId);
+}
+
+function getItem(itemId) {
+  return items.find(item => item.id === itemId);
 }
 
 function animRatio(value, max) {
@@ -124,7 +196,7 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
     exp: 0,
     expNeed: 60,
     gold: 0,
-    items: [],
+    items: {},
   };
   return Object.assign(base, stats);
 }
@@ -471,7 +543,7 @@ function addAttackEffect(attacker, target) {
   const dx = target.x - attacker.x;
   const dy = target.y - attacker.y;
   const angle = Math.atan2(dy, dx);
-  const hasBow = attacker.kind === "player" && attacker.items.includes("bow");
+  const hasBow = attacker.kind === "player" && hasEquipped(attacker, "bow");
   const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "minion" ? "stab" : "slash";
   state.effects.push({
     type: kind,
@@ -875,7 +947,7 @@ function drawFighter(e, color, scale, accent) {
   const pose = getMotionPose(e, 6, 1.2, 10 * scale, 6 * scale);
   const x = pose.x;
   const y = pose.y;
-  const hasBow = e.kind === "player" && e.items.includes("bow");
+  const hasBow = e.kind === "player" && hasEquipped(e, "bow");
   const handX = x + 10 * scale + e.faceX * pose.strike * 5 * scale;
   const handY = y + 1 * scale + e.faceY * pose.strike * 5 * scale;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
@@ -1041,7 +1113,7 @@ function drawHud() {
 }
 
 function drawInventory(player) {
-  const slots = 4;
+  const slots = equipmentSlots.length;
   const size = 34;
   const gap = 8;
   const startX = W / 2 - ((slots * size + (slots - 1) * gap) / 2);
@@ -1053,8 +1125,9 @@ function drawInventory(player) {
   ctx.fillText("裝備", W / 2, y - 5);
 
   for (let i = 0; i < slots; i += 1) {
+    const slot = equipmentSlots[i];
     const x = startX + i * (size + gap);
-    const item = items.find(entry => entry.id === player.items[i]);
+    const item = getItem(player.items[slot.id]);
     ctx.fillStyle = item ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)";
     ctx.strokeStyle = item ? item.color : "rgba(255,255,255,0.2)";
     ctx.lineWidth = item ? 2.5 : 1.5;
@@ -1074,6 +1147,9 @@ function drawInventory(player) {
       ctx.fillStyle = "rgba(255,255,255,0.3)";
       ctx.font = "800 15px system-ui";
       ctx.fillText("+", x + size / 2, y + 22);
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.font = "700 9px system-ui";
+      ctx.fillText(slot.label, x + size / 2, y + 43);
     }
   }
 }
@@ -1102,7 +1178,7 @@ function renderShop() {
     const row = document.createElement("div");
     row.className = "shop-item";
     const info = document.createElement("div");
-    info.innerHTML = `<strong>${item.name}</strong><br><small>${item.text} / ${item.cost} Gold（金錢）</small>`;
+    info.innerHTML = `<strong>${item.icon} ${item.name}</strong><br><small>${item.type} / ${item.text} / ${item.cost} Gold（金錢）</small>`;
     const button = document.createElement("button");
     button.className = "buy-button";
     button.type = "button";
@@ -1115,18 +1191,16 @@ function renderShop() {
 
 function buyItem(item) {
   const p = state.player;
-  if (p.items.length >= 4) {
-    showMessage("裝備欄已滿");
-    return;
-  }
   if (p.gold < item.cost) {
     showMessage("Gold（金錢）不足");
     return;
   }
+  const oldItem = getItem(p.items[item.slot]);
   p.gold -= item.cost;
-  p.items.push(item.id);
+  if (oldItem && oldItem.remove) oldItem.remove(p);
+  p.items[item.slot] = item.id;
   item.apply(p);
-  showMessage(`已購買 ${item.name}`);
+  showMessage(oldItem ? `已替換 ${oldItem.name} -> ${item.name}` : `已裝備 ${item.name}`);
 }
 
 function resizeCanvas() {
