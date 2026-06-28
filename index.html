@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>三路 MOBA 手機原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="game-shell" aria-label="三路 MOBA 手機原型">
+      <canvas id="game" width="390" height="844"></canvas>
+      <div id="touch-ui">
+        <div id="joystick" class="stick-zone" aria-label="移動搖桿">
+          <div class="stick-base"></div>
+          <div id="stick-thumb" class="stick-thumb"></div>
+        </div>
+        <button id="shop-button" class="round-button shop" type="button">商店</button>
+        <button id="attack-button" class="round-button attack" type="button">攻擊</button>
+      </div>
+      <section id="shop-panel" aria-label="商店">
+        <header>
+          <strong>商店</strong>
+          <button id="close-shop" type="button">關閉</button>
+        </header>
+        <div id="shop-items"></div>
+      </section>
+    </main>
+    <script src="./game.js"></script>
+  </body>
+</html>
