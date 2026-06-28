@@ -57,6 +57,39 @@ function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function animRatio(value, max) {
+  return max > 0 ? clamp(value / max, 0, 1) : 0;
+}
+
+function getMotionPose(e, bobSpeed = 0, bobAmp = 0, lungePower = 0, hurtPower = 0) {
+  const attack = animRatio(e.attackAnim, e.attackAnimMax);
+  const hurt = animRatio(e.hurtAnim, e.hurtAnimMax);
+  const strike = Math.sin((1 - attack) * Math.PI);
+  const bob = bobSpeed ? Math.sin(state.time * bobSpeed + e.id) * bobAmp : 0;
+  return {
+    x: e.x + e.faceX * lungePower * strike + e.hitX * hurtPower * hurt,
+    y: e.y + bob + e.faceY * lungePower * strike + e.hitY * hurtPower * hurt,
+    attack,
+    hurt,
+    strike,
+  };
+}
+
+function drawHurtFlash(x, y, radius, hurt) {
+  if (hurt <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.35 * hurt;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.22 * hurt;
+  ctx.strokeStyle = "#ffe3e3";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
+
 function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
   const base = {
     id: state.nextId++,
@@ -74,6 +107,14 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
     speed: 40,
     attackCd: 0,
     attackRate: 1,
+    attackAnim: 0,
+    attackAnimMax: 0.22,
+    hurtAnim: 0,
+    hurtAnimMax: 0.28,
+    faceX: 0,
+    faceY: team === "blue" ? -1 : 1,
+    hitX: 0,
+    hitY: 0,
     dead: false,
     respawn: 0,
     targetId: null,
@@ -219,6 +260,8 @@ function update(dt) {
       continue;
     }
     entity.attackCd = Math.max(0, entity.attackCd - dt);
+    entity.attackAnim = Math.max(0, entity.attackAnim - dt);
+    entity.hurtAnim = Math.max(0, entity.hurtAnim - dt);
     if (entity.kind === "player") updatePlayer(entity, dt);
     if (entity.kind === "minion") updateMinion(entity, dt);
     if (entity.kind === "hero") updateHero(entity, dt);
@@ -316,6 +359,15 @@ function moveToward(entity, x, y, dt, speed) {
 
 function attack(attacker, target) {
   if (attacker.attackCd > 0 || target.dead || target.hp <= 0) return false;
+  const dx = target.x - attacker.x;
+  const dy = target.y - attacker.y;
+  const len = Math.hypot(dx, dy) || 1;
+  attacker.faceX = dx / len;
+  attacker.faceY = dy / len;
+  target.hitX = dx / len;
+  target.hitY = dy / len;
+  attacker.attackAnim = attacker.attackAnimMax;
+  target.hurtAnim = target.hurtAnimMax;
   const damage = Math.max(1, Math.round(attacker.atk - target.def));
   target.hp -= damage;
   attacker.attackCd = attacker.attackRate;
@@ -680,69 +732,80 @@ function drawEntity(e) {
 }
 
 function drawTower(e, color) {
+  const pose = getMotionPose(e, 0, 0, 0, 3);
+  const x = pose.x;
+  const y = pose.y;
   const pulse = 0.5 + Math.sin(state.time * 3 + e.id) * 0.5;
+  const charge = Math.sin((1 - pose.attack) * Math.PI);
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
-  ctx.ellipse(e.x, e.y + 24, 23, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, e.y + 24, 23, 8, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = e.team === "blue" ? `rgba(80,160,255,${0.1 + pulse * 0.08})` : `rgba(255,90,100,${0.1 + pulse * 0.08})`;
+  ctx.fillStyle = e.team === "blue" ? `rgba(80,160,255,${0.1 + pulse * 0.08 + charge * 0.12})` : `rgba(255,90,100,${0.1 + pulse * 0.08 + charge * 0.12})`;
   ctx.beginPath();
-  ctx.arc(e.x, e.y + 4, 36 + pulse * 5, 0, Math.PI * 2);
+  ctx.arc(x, y + 4, 36 + pulse * 5 + charge * 8, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.roundRect(e.x - 18, e.y - 12, 36, 38, 5);
+  ctx.roundRect(x - 18, y - 12, 36, 38, 5);
   ctx.fill();
-  ctx.fillStyle = "#eaf4ff";
-  ctx.fillRect(e.x - 12, e.y - 20, 24, 10);
-  ctx.fillRect(e.x - 4, e.y - 30, 8, 12);
+  ctx.fillStyle = charge > 0.35 ? "#ffffff" : "#eaf4ff";
+  ctx.fillRect(x - 12, y - 20, 24, 10);
+  ctx.fillRect(x - 4, y - 30 - charge * 4, 8, 12 + charge * 4);
   ctx.strokeStyle = "#18212b";
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(e.x, e.y - 8);
-  ctx.lineTo(e.x, e.y + 18);
+  ctx.moveTo(x, y - 8);
+  ctx.lineTo(x, y + 18);
   ctx.stroke();
   ctx.strokeStyle = e.team === "blue" ? "#9ccdff" : "#ffb6bb";
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 4 + charge * 2;
   ctx.beginPath();
-  ctx.arc(e.x, e.y - 3, 10, Math.PI * 0.15, Math.PI * 0.85, true);
+  ctx.arc(x, y - 3, 10 + charge * 3, Math.PI * 0.15, Math.PI * 0.85, true);
   ctx.stroke();
+  drawHurtFlash(x, y + 3, 25, pose.hurt);
 }
 
 function drawCastle(e, color) {
+  const pose = getMotionPose(e, 0, 0, 0, 4);
+  const x = pose.x;
+  const y = pose.y;
   const pulse = 0.5 + Math.sin(state.time * 2 + e.id) * 0.5;
   ctx.fillStyle = e.team === "blue" ? `rgba(80,160,255,${0.12 + pulse * 0.08})` : `rgba(255,90,100,${0.12 + pulse * 0.08})`;
   ctx.beginPath();
-  ctx.ellipse(e.x, e.y + 10, 70 + pulse * 8, 38 + pulse * 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + 10, 70 + pulse * 8, 38 + pulse * 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.roundRect(e.x - 30, e.y - 20, 60, 46, 6);
+  ctx.roundRect(x - 30, y - 20, 60, 46, 6);
   ctx.fill();
-  ctx.fillRect(e.x - 36, e.y - 8, 14, 34);
-  ctx.fillRect(e.x + 22, e.y - 8, 14, 34);
+  ctx.fillRect(x - 36, y - 8, 14, 34);
+  ctx.fillRect(x + 22, y - 8, 14, 34);
 
   ctx.fillStyle = "#f8fbff";
-  ctx.fillRect(e.x - 30, e.y - 30, 10, 10);
-  ctx.fillRect(e.x - 5, e.y - 32, 10, 12);
-  ctx.fillRect(e.x + 20, e.y - 30, 10, 10);
+  ctx.fillRect(x - 30, y - 30, 10, 10);
+  ctx.fillRect(x - 5, y - 32, 10, 12);
+  ctx.fillRect(x + 20, y - 30, 10, 10);
   ctx.fillStyle = "#17202a";
   ctx.beginPath();
-  ctx.roundRect(e.x - 8, e.y + 3, 16, 23, 8);
+  ctx.roundRect(x - 8, y + 3, 16, 23, 8);
   ctx.fill();
   ctx.fillStyle = e.team === "blue" ? "#9ccdff" : "#ffb6bb";
-  ctx.fillRect(e.x - 22, e.y - 4, 10, 10);
-  ctx.fillRect(e.x + 12, e.y - 4, 10, 10);
+  ctx.fillRect(x - 22, y - 4, 10, 10);
+  ctx.fillRect(x + 12, y - 4, 10, 10);
+  drawHurtFlash(x, y, 44, pose.hurt);
 }
 
 function drawMinion(e, color) {
-  const dir = e.team === "blue" ? -1 : 1;
-  const bob = Math.sin(state.time * 8 + e.id) * 1.6;
-  const x = e.x;
-  const y = e.y + bob;
+  const pose = getMotionPose(e, 8, 1.6, 7, 5);
+  const x = pose.x;
+  const y = pose.y;
+  const reach = 14 + pose.strike * 11;
+  const handX = x + 7;
+  const handY = y + 3;
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
   ctx.ellipse(x, e.y + 11, 11, 4, 0, 0, Math.PI * 2);
@@ -769,11 +832,22 @@ function drawMinion(e, color) {
   ctx.fillStyle = "#f8fbff";
   ctx.fillRect(x - 5, y - 2, 10, 8);
   ctx.strokeStyle = "#f6e49e";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 + pose.strike * 1.2;
   ctx.beginPath();
-  ctx.moveTo(x + 7, y + 3);
-  ctx.lineTo(x + 15, y + 3 + dir * 5);
+  ctx.moveTo(handX, handY);
+  ctx.lineTo(handX + e.faceX * reach, handY + e.faceY * reach);
   ctx.stroke();
+  if (pose.strike > 0.25) {
+    ctx.globalAlpha = 0.55 * pose.strike;
+    ctx.strokeStyle = e.team === "blue" ? "#b9d8ff" : "#ffd0d0";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(handX + e.faceX * (reach - 8), handY + e.faceY * (reach - 8));
+    ctx.lineTo(handX + e.faceX * (reach + 5), handY + e.faceY * (reach + 5));
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  drawHurtFlash(x, y + 2, 17, pose.hurt);
 }
 
 function drawHero(e, color) {
@@ -782,26 +856,28 @@ function drawHero(e, color) {
 
 function drawPlayer(e, color) {
   drawFighter(e, color, 1.16, "#ffffff");
-  const bob = Math.sin(state.time * 6 + e.id) * 1.2;
+  const pose = getMotionPose(e, 6, 1.2, 10 * 1.16, 6 * 1.16);
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.moveTo(e.x - 8, e.y + bob - 23);
-  ctx.lineTo(e.x, e.y + bob - 31);
-  ctx.lineTo(e.x + 8, e.y + bob - 23);
+  ctx.moveTo(pose.x - 8, pose.y - 23);
+  ctx.lineTo(pose.x, pose.y - 31);
+  ctx.lineTo(pose.x + 8, pose.y - 23);
   ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = "#b9d8ff";
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 3 + pose.strike;
   ctx.beginPath();
-  ctx.arc(e.x, e.y, e.radius + 7, 0, Math.PI * 2);
+  ctx.arc(pose.x, pose.y, e.radius + 7 + pose.strike * 2, 0, Math.PI * 2);
   ctx.stroke();
 }
 
 function drawFighter(e, color, scale, accent) {
-  const dir = e.team === "blue" ? -1 : 1;
-  const bob = Math.sin(state.time * 6 + e.id) * 1.2;
-  const x = e.x;
-  const y = e.y + bob;
+  const pose = getMotionPose(e, 6, 1.2, 10 * scale, 6 * scale);
+  const x = pose.x;
+  const y = pose.y;
+  const hasBow = e.kind === "player" && e.items.includes("bow");
+  const handX = x + 10 * scale + e.faceX * pose.strike * 5 * scale;
+  const handY = y + 1 * scale + e.faceY * pose.strike * 5 * scale;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
   ctx.ellipse(x, e.y + 17 * scale, 16 * scale, 5 * scale, 0, 0, Math.PI * 2);
@@ -815,6 +891,8 @@ function drawFighter(e, color, scale, accent) {
   ctx.lineTo(x, y + 12 * scale);
   ctx.moveTo(x, y + 1 * scale);
   ctx.lineTo(x - 14 * scale, y + 8 * scale);
+  ctx.moveTo(x, y + 1 * scale);
+  ctx.lineTo(handX, handY);
   ctx.moveTo(x, y + 12 * scale);
   ctx.lineTo(x - 8 * scale, y + 25 * scale);
   ctx.moveTo(x, y + 12 * scale);
@@ -833,16 +911,50 @@ function drawFighter(e, color, scale, accent) {
   ctx.shadowColor = accent;
   ctx.shadowBlur = 8;
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 3 * scale;
-  ctx.beginPath();
-  ctx.moveTo(x + 10 * scale, y + 1 * scale);
-  ctx.lineTo(x + 23 * scale, y - 10 * dir * scale);
-  ctx.stroke();
+  ctx.lineWidth = (hasBow ? 2.4 : 3 + pose.strike * 1.4) * scale;
+  if (hasBow) {
+    const bowRadius = 14 * scale + pose.strike * 3 * scale;
+    const aim = Math.atan2(e.faceY, e.faceX);
+    ctx.beginPath();
+    ctx.arc(handX + e.faceX * 5 * scale, handY + e.faceY * 5 * scale, bowRadius, aim - 0.9, aim + 0.9);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#f8fbff";
+    ctx.lineWidth = 1.3 * scale;
+    ctx.beginPath();
+    ctx.moveTo(handX + Math.cos(aim - 0.9) * bowRadius, handY + Math.sin(aim - 0.9) * bowRadius);
+    ctx.lineTo(handX - e.faceX * (10 + pose.strike * 10) * scale, handY - e.faceY * (10 + pose.strike * 10) * scale);
+    ctx.lineTo(handX + Math.cos(aim + 0.9) * bowRadius, handY + Math.sin(aim + 0.9) * bowRadius);
+    ctx.stroke();
+    if (pose.strike > 0.15) {
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2 * scale;
+      ctx.beginPath();
+      ctx.moveTo(handX - e.faceX * 12 * scale, handY - e.faceY * 12 * scale);
+      ctx.lineTo(handX + e.faceX * 20 * scale, handY + e.faceY * 20 * scale);
+      ctx.stroke();
+    }
+  } else {
+    const reach = 24 * scale + pose.strike * 12 * scale;
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(handX + e.faceX * reach + 5 * scale, handY + e.faceY * reach);
+    ctx.stroke();
+    if (pose.strike > 0.25) {
+      ctx.globalAlpha = 0.5 * pose.strike;
+      ctx.lineWidth = 5 * scale;
+      ctx.beginPath();
+      ctx.arc(handX + e.faceX * 10 * scale, handY + e.faceY * 10 * scale, 15 * scale, -0.4 + Math.atan2(e.faceY, e.faceX), 0.65 + Math.atan2(e.faceY, e.faceX));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
   ctx.shadowBlur = 0;
   ctx.fillStyle = accent;
   ctx.beginPath();
   ctx.roundRect(x - 24 * scale, y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
   ctx.fill();
+  drawHurtFlash(x, y + 2 * scale, 22 * scale, pose.hurt);
 }
 
 function drawHealthBar(e) {
