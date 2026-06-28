@@ -330,6 +330,7 @@ function update(dt) {
     if (entity.dead) {
       entity.respawn -= dt;
       if (entity.respawn <= 0 && entity.kind === "hero") respawnHero(entity);
+      if (entity.respawn <= 0 && entity.kind === "player") respawnPlayer(entity);
       continue;
     }
     entity.attackCd = Math.max(0, entity.attackCd - dt);
@@ -363,6 +364,7 @@ function update(dt) {
 }
 
 function updatePlayer(player, dt) {
+  if (player.dead) return;
   player.x = clamp(player.x + state.input.x * player.speed * dt, 24, W - 24);
   player.y = clamp(player.y + state.input.y * player.speed * dt, FIELD_TOP, FIELD_BOTTOM);
   const autoTarget = getPlayerTarget(player.range + 20);
@@ -453,6 +455,10 @@ function attack(attacker, target) {
 
 function playerAttack() {
   if (state.gameOver) return;
+  if (state.player.dead) {
+    showMessage(`Respawn（復活）剩餘 ${Math.ceil(state.player.respawn)} 秒`);
+    return;
+  }
   const target = getPlayerTarget(state.player.range + 76);
   if (!target) {
     showMessage("附近沒有可攻擊目標");
@@ -466,8 +472,16 @@ function getPlayerTarget(range) {
 }
 
 function updatePlayerTargetHint() {
+  if (state.player.dead) {
+    state.targetHint = null;
+    return;
+  }
   const target = getPlayerTarget(state.player.range + 76);
   state.targetHint = target ? target.id : null;
+}
+
+function getPlayerRespawnTime(player) {
+  return Math.round(4 + player.level * 1.4);
 }
 
 function kill(target, killer) {
@@ -492,6 +506,18 @@ function kill(target, killer) {
   if (target.kind === "hero") {
     target.respawn = 8;
     showMessage(`${target.team === "red" ? "紅方" : "藍方"}英雄倒下`);
+  }
+  if (target.kind === "player") {
+    target.respawn = getPlayerRespawnTime(target);
+    target.x = W / 2;
+    target.y = 636;
+    target.attackCd = 0;
+    target.attackAnim = 0;
+    target.hurtAnim = 0;
+    state.input.x = 0;
+    state.input.y = 0;
+    resetStick();
+    showMessage(`你已倒下：Respawn（復活）${target.respawn} 秒`);
   }
 }
 
@@ -521,6 +547,17 @@ function respawnHero(hero) {
   hero.hp = hero.maxHp;
   hero.x = LANES[hero.laneIndex].x;
   hero.y = hero.team === "blue" ? 628 : 92;
+}
+
+function respawnPlayer(player) {
+  player.dead = false;
+  player.hp = player.maxHp;
+  player.x = W / 2;
+  player.y = 636;
+  player.attackCd = 0;
+  player.respawn = 0;
+  addHit(player.x, player.y, player.team);
+  showMessage("已 Respawn（復活）：回到主堡");
 }
 
 function endGame(winner) {
@@ -582,6 +619,7 @@ function draw() {
   for (const entity of sorted) {
     if (!entity.dead) drawEntity(entity);
   }
+  drawRespawnMarker();
   drawAttackEffects();
   drawParticles();
   drawFloatingTexts();
@@ -607,6 +645,27 @@ function drawTargetHint() {
   ctx.moveTo(state.player.x, state.player.y);
   ctx.lineTo(target.x, target.y);
   ctx.stroke();
+}
+
+function drawRespawnMarker() {
+  const player = state.player;
+  if (!player || !player.dead) return;
+  const pulse = 0.5 + Math.sin(state.time * 5) * 0.5;
+  ctx.save();
+  ctx.fillStyle = `rgba(80,160,255,${0.16 + pulse * 0.12})`;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 24 + pulse * 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#b9d8ff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(player.respawn / getPlayerRespawnTime(player), 0, 1));
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "900 13px system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText(Math.ceil(player.respawn), player.x, player.y + 5);
+  ctx.restore();
 }
 
 function drawAttackEffects() {
@@ -1160,10 +1219,11 @@ function drawHud() {
   ctx.fillStyle = "#fff";
   ctx.font = "800 15px system-ui";
   ctx.textAlign = "left";
-  ctx.fillText(`Lv.${p.level}  HP ${Math.ceil(p.hp)}/${p.maxHp}`, 14, 24);
+  const hpText = p.dead ? `Respawn ${Math.ceil(p.respawn)}s` : `HP ${Math.ceil(p.hp)}/${p.maxHp}`;
+  ctx.fillText(`Lv.${p.level}  ${hpText}`, 14, 24);
   ctx.fillText(`Gold ${p.gold}  ATK ${p.atk}  DEF ${p.def}`, 14, 50);
 
-  drawBar(190, 16, 84, 9, p.hp / p.maxHp, "#65aefb");
+  drawBar(190, 16, 84, 9, p.dead ? 0 : p.hp / p.maxHp, p.dead ? "#ff8085" : "#65aefb");
   drawBar(190, 38, 84, 9, p.exp / p.expNeed, GOLD);
 
   ctx.textAlign = "right";
@@ -1173,6 +1233,17 @@ function drawHud() {
   ctx.fillText(`藍堡 ${Math.max(0, Math.ceil(state.blueBase.hp))}`, W - 14, 50);
 
   drawInventory(p);
+
+  if (p.dead) {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(0,0,0,0.58)";
+    ctx.beginPath();
+    ctx.roundRect(42, 124, W - 84, 44, 8);
+    ctx.fill();
+    ctx.fillStyle = "#ffd0d0";
+    ctx.font = "900 16px system-ui";
+    ctx.fillText(`Respawn（復活） ${Math.ceil(p.respawn)} 秒`, W / 2, 150);
+  }
 
   if (state.messageTimer > 0) {
     ctx.textAlign = "center";
