@@ -43,6 +43,7 @@ const state = {
 
 const items = [
   { id: "sword", icon: "劍", color: "#f6e49e", name: "短劍", cost: 100, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
+  { id: "bow", icon: "弓", color: "#d8b36a", name: "弓箭", cost: 135, text: "Range（攻擊距離）+95 / ATK +4", apply: p => { p.range += 95; p.atk += 4; } },
   { id: "armor", icon: "甲", color: "#9ccdff", name: "護甲", cost: 120, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
   { id: "boots", icon: "靴", color: "#bdf2a0", name: "靴子", cost: 95, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
   { id: "stone", icon: "心", color: "#ff9aa2", name: "生命石", cost: 145, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
@@ -248,7 +249,7 @@ function update(dt) {
 function updatePlayer(player, dt) {
   player.x = clamp(player.x + state.input.x * player.speed * dt, 24, W - 24);
   player.y = clamp(player.y + state.input.y * player.speed * dt, FIELD_TOP, FIELD_BOTTOM);
-  const autoTarget = getPlayerTarget(72);
+  const autoTarget = getPlayerTarget(player.range + 20);
   if (autoTarget) attack(player, autoTarget);
 }
 
@@ -328,7 +329,7 @@ function attack(attacker, target) {
 
 function playerAttack() {
   if (state.gameOver) return;
-  const target = getPlayerTarget(128);
+  const target = getPlayerTarget(state.player.range + 76);
   if (!target) {
     showMessage("附近沒有可攻擊目標");
     return;
@@ -341,7 +342,7 @@ function getPlayerTarget(range) {
 }
 
 function updatePlayerTargetHint() {
-  const target = getPlayerTarget(128);
+  const target = getPlayerTarget(state.player.range + 76);
   state.targetHint = target ? target.id : null;
 }
 
@@ -418,7 +419,8 @@ function addAttackEffect(attacker, target) {
   const dx = target.x - attacker.x;
   const dy = target.y - attacker.y;
   const angle = Math.atan2(dy, dx);
-  const kind = attacker.kind === "tower" ? "beam" : attacker.kind === "minion" ? "stab" : "slash";
+  const hasBow = attacker.kind === "player" && attacker.items.includes("bow");
+  const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "minion" ? "stab" : "slash";
   state.effects.push({
     type: kind,
     team: attacker.team,
@@ -428,8 +430,8 @@ function addAttackEffect(attacker, target) {
     y2: target.y,
     angle,
     color,
-    life: kind === "beam" ? 0.22 : 0.18,
-    duration: kind === "beam" ? 0.22 : 0.18,
+    life: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : 0.18,
+    duration: kind === "beam" ? 0.22 : kind === "arrow" ? 0.3 : 0.18,
     width: attacker.kind === "tower" ? 7 : attacker.kind === "player" ? 6 : 4,
   });
 }
@@ -510,6 +512,38 @@ function drawAttackEffects() {
       ctx.beginPath();
       ctx.moveTo(effect.x1, effect.y1 - 8);
       ctx.lineTo(effect.x2, effect.y2);
+      ctx.stroke();
+    } else if (effect.type === "arrow") {
+      const mx = effect.x1 + (effect.x2 - effect.x1) * t;
+      const my = effect.y1 + (effect.y2 - effect.y1) * t;
+      ctx.strokeStyle = "rgba(255,255,255,0.42)";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(effect.x1, effect.y1);
+      ctx.lineTo(effect.x2, effect.y2);
+      ctx.stroke();
+      ctx.translate(mx, my);
+      ctx.rotate(effect.angle);
+      ctx.strokeStyle = "#f6e49e";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-12, 0);
+      ctx.lineTo(10, 0);
+      ctx.stroke();
+      ctx.fillStyle = "#f6e49e";
+      ctx.beginPath();
+      ctx.moveTo(13, 0);
+      ctx.lineTo(4, -5);
+      ctx.lineTo(4, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "rgba(185,216,255,0.65)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-18, -4);
+      ctx.lineTo(-11, 0);
+      ctx.lineTo(-18, 4);
       ctx.stroke();
     } else if (effect.type === "slash") {
       ctx.translate(effect.x2, effect.y2);
