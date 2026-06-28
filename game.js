@@ -34,14 +34,16 @@ const state = {
   input: { x: 0, y: 0 },
   entities: [],
   particles: [],
+  texts: [],
+  targetHint: null,
   nextId: 1,
 };
 
 const items = [
-  { id: "sword", name: "短劍", cost: 120, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
-  { id: "armor", name: "護甲", cost: 140, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
-  { id: "boots", name: "靴子", cost: 110, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
-  { id: "stone", name: "生命石", cost: 160, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
+  { id: "sword", name: "短劍", cost: 100, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
+  { id: "armor", name: "護甲", cost: 120, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
+  { id: "boots", name: "靴子", cost: 95, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
+  { id: "stone", name: "生命石", cost: 145, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
 ];
 
 function clamp(value, min, max) {
@@ -86,6 +88,8 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
 function init() {
   state.entities = [];
   state.particles = [];
+  state.texts = [];
+  state.targetHint = null;
   state.nextId = 1;
   state.gameOver = false;
   state.winner = null;
@@ -102,16 +106,16 @@ function init() {
 
   LANES.forEach((lane, i) => {
     state.entities.push(makeEntity("tower", "red", i, lane.x, 136, {
-      radius: 22, hp: 600, maxHp: 600, atk: 35, range: 96, attackRate: 1.15, speed: 0,
+      radius: 22, hp: 560, maxHp: 560, atk: 30, range: 92, attackRate: 1.25, speed: 0,
     }));
     state.entities.push(makeEntity("tower", "blue", i, lane.x, 556, {
-      radius: 22, hp: 600, maxHp: 600, atk: 35, range: 96, attackRate: 1.15, speed: 0,
+      radius: 22, hp: 560, maxHp: 560, atk: 30, range: 92, attackRate: 1.25, speed: 0,
     }));
   });
 
   state.player = makeEntity("player", "blue", 1, W / 2, 636, {
-    radius: 15, hp: 300, maxHp: 300, atk: 25, def: 2, range: 44, attackRate: 0.72, speed: 168,
-    gold: 150,
+    radius: 15, hp: 320, maxHp: 320, atk: 27, def: 3, range: 52, attackRate: 0.62, speed: 186,
+    gold: 180,
   });
   state.entities.push(state.player);
 
@@ -125,8 +129,8 @@ function init() {
 function makeHero(team, laneIndex) {
   const lane = LANES[laneIndex];
   return makeEntity("hero", team, laneIndex, lane.x, team === "blue" ? 628 : 92, {
-    radius: 14, hp: 240, maxHp: 240, atk: 18, def: 2, range: 42, attackRate: 0.85,
-    speed: 94, rewardGold: 100, rewardExp: 80,
+    radius: 14, hp: 250, maxHp: 250, atk: 18, def: 2, range: 46, attackRate: 0.88,
+    speed: 98, rewardGold: 120, rewardExp: 90,
   });
 }
 
@@ -134,8 +138,8 @@ function spawnMinion(team, laneIndex, offset) {
   const lane = LANES[laneIndex];
   const y = team === "blue" ? 686 + offset : 66 - offset;
   state.entities.push(makeEntity("minion", team, laneIndex, lane.x + offset * 0.9, y, {
-    radius: 9, hp: 80, maxHp: 80, atk: 8, def: 0, range: 24, attackRate: 0.95,
-    speed: 58, rewardGold: 10, rewardExp: 15,
+    radius: 9, hp: 76, maxHp: 76, atk: 7, def: 0, range: 24, attackRate: 1,
+    speed: 62, rewardGold: 14, rewardExp: 18,
   }));
 }
 
@@ -195,7 +199,9 @@ function update(dt) {
   state.waveTimer += dt;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
 
-  if (state.waveTimer >= 10) {
+  updatePlayerTargetHint();
+
+  if (state.waveTimer >= 8) {
     state.waveTimer = 0;
     spawnWave();
   }
@@ -219,6 +225,11 @@ function update(dt) {
     p.y += p.vy * dt;
     return p.life > 0;
   });
+  state.texts = state.texts.filter(t => {
+    t.life -= dt;
+    t.y -= t.speed * dt;
+    return t.life > 0;
+  });
 
   state.entities = state.entities.filter(e => !(e.dead && e.kind === "minion"));
   if (state.redBase.hp <= 0) endGame("blue");
@@ -228,6 +239,8 @@ function update(dt) {
 function updatePlayer(player, dt) {
   player.x = clamp(player.x + state.input.x * player.speed * dt, 24, W - 24);
   player.y = clamp(player.y + state.input.y * player.speed * dt, FIELD_TOP, FIELD_BOTTOM);
+  const autoTarget = getPlayerTarget(72);
+  if (autoTarget) attack(player, autoTarget);
 }
 
 function updateMinion(entity, dt) {
@@ -297,18 +310,28 @@ function attack(attacker, target) {
   target.hp -= damage;
   attacker.attackCd = attacker.attackRate;
   addHit(target.x, target.y, attacker.team);
+  addFloatingText(target.x, target.y - target.radius - 12, `-${damage}`, attacker.team === "blue" ? "#b9d8ff" : "#ffd0d0");
   if (target.hp <= 0) kill(target, attacker);
   return true;
 }
 
 function playerAttack() {
   if (state.gameOver) return;
-  const target = nearestEnemy(state.player, 82, e => e.kind !== "base" || noEnemyTowerAhead(state.player));
+  const target = getPlayerTarget(128);
   if (!target) {
     showMessage("附近沒有可攻擊目標");
     return;
   }
   if (attack(state.player, target)) showMessage(`攻擊 ${target.kind === "tower" ? "劍塔" : target.kind === "base" ? "主堡" : "敵人"}`);
+}
+
+function getPlayerTarget(range) {
+  return nearestEnemy(state.player, range, e => e.kind !== "base" || noEnemyTowerAhead(state.player));
+}
+
+function updatePlayerTargetHint() {
+  const target = getPlayerTarget(128);
+  state.targetHint = target ? target.id : null;
 }
 
 function kill(target, killer) {
@@ -318,11 +341,17 @@ function kill(target, killer) {
   const player = state.player;
   if (target.team === "red" && (killer.id === player.id || dist(player, target) < 172)) {
     const scale = killer.id === player.id ? 1 : 0.55;
-    gainReward(Math.round(target.rewardGold * scale), Math.round(target.rewardExp * scale));
+    const gold = Math.round(target.rewardGold * scale);
+    const exp = Math.round(target.rewardExp * scale);
+    gainReward(gold, exp);
+    addFloatingText(player.x, player.y - 34, `+${gold}G +${exp}EXP`, GOLD);
   }
   if (target.kind === "tower") {
     showMessage(`${target.team === "red" ? "紅方" : "藍方"}${LANES[target.laneIndex].name}路劍塔被摧毀`);
-    if (target.team === "red") gainReward(80, 40);
+    if (target.team === "red") {
+      gainReward(120, 70);
+      addFloatingText(player.x, player.y - 42, "+120G +70EXP", GOLD);
+    }
   }
   if (target.kind === "hero") {
     target.respawn = 8;
@@ -342,12 +371,13 @@ function levelUp() {
   const p = state.player;
   p.exp -= p.expNeed;
   p.level += 1;
-  p.expNeed = Math.round(60 + p.level * 34);
-  p.maxHp += 20;
+  p.expNeed = Math.round(58 + p.level * 30);
+  p.maxHp += 26;
   p.hp = p.maxHp;
-  p.atk += 3;
+  p.atk += 4;
   p.def += 1;
   showMessage(`升級到 Lv.${p.level}：HP、ATK、DEF 提升`);
+  addFloatingText(p.x, p.y - 50, `LEVEL ${p.level}`, "#f6e49e", 1.2);
 }
 
 function respawnHero(hero) {
@@ -367,6 +397,10 @@ function addHit(x, y, team) {
   state.particles.push({ x, y, vx: 0, vy: -18, life: 0.22, color: team === "blue" ? "#b9d8ff" : "#ffd0d0", r: 8 });
 }
 
+function addFloatingText(x, y, text, color, scale = 1) {
+  state.texts.push({ x, y, text, color, scale, life: 1, speed: 30 });
+}
+
 function addBurst(x, y, color) {
   for (let i = 0; i < 8; i += 1) {
     const a = (Math.PI * 2 * i) / 8;
@@ -378,12 +412,33 @@ function draw() {
   ctx.clearRect(0, 0, W, H);
   drawMap();
   const sorted = [...state.entities].sort((a, b) => a.y - b.y);
+  drawTargetHint();
   for (const entity of sorted) {
     if (!entity.dead) drawEntity(entity);
   }
   drawParticles();
+  drawFloatingTexts();
   drawHud();
   if (state.gameOver) drawGameOver();
+}
+
+function drawTargetHint() {
+  const target = findById(state.targetHint);
+  if (!target) return;
+  ctx.strokeStyle = "#f6e49e";
+  ctx.lineWidth = 3;
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.arc(target.x, target.y, target.radius + 12, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.strokeStyle = "rgba(246,228,158,0.45)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(state.player.x, state.player.y);
+  ctx.lineTo(target.x, target.y);
+  ctx.stroke();
 }
 
 function drawMap() {
@@ -607,6 +662,20 @@ function drawParticles() {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
     ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts() {
+  ctx.textAlign = "center";
+  ctx.font = "800 13px system-ui";
+  for (const t of state.texts) {
+    ctx.globalAlpha = clamp(t.life, 0, 1);
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillText(t.text, t.x + 1, t.y + 1);
+    ctx.fillStyle = t.color;
+    ctx.font = `800 ${Math.round(13 * t.scale)}px system-ui`;
+    ctx.fillText(t.text, t.x, t.y);
   }
   ctx.globalAlpha = 1;
 }
