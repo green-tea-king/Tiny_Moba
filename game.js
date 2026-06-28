@@ -128,6 +128,11 @@ function getItem(itemId) {
   return items.find(item => item.id === itemId);
 }
 
+function getEquippedItem(entity, slotId) {
+  if (!entity.items || Array.isArray(entity.items)) return null;
+  return getItem(entity.items[slotId]) || null;
+}
+
 function animRatio(value, max) {
   return max > 0 ? clamp(value / max, 0, 1) : 0;
 }
@@ -958,6 +963,11 @@ function drawFighter(e, color, scale, accent) {
   const hasBow = e.kind === "player" && hasEquipped(e, "bow");
   const hasSword = e.kind !== "player" || hasEquipped(e, "sword");
   const isUnarmed = e.kind === "player" && !hasBow && !hasSword;
+  const weaponItem = e.kind === "player" ? getEquippedItem(e, "weapon") : null;
+  const hatItem = e.kind === "player" ? getEquippedItem(e, "hat") : null;
+  const clothesItem = e.kind === "player" ? getEquippedItem(e, "clothes") : null;
+  const shoesItem = e.kind === "player" ? getEquippedItem(e, "shoes") : null;
+  const weaponAccent = weaponItem ? weaponItem.color : accent;
   const handX = x + 10 * scale + e.faceX * pose.strike * 5 * scale;
   const handY = y + 1 * scale + e.faceY * pose.strike * 5 * scale;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
@@ -981,18 +991,53 @@ function drawFighter(e, color, scale, accent) {
   ctx.lineTo(x + 8 * scale, y + 25 * scale);
   ctx.stroke();
 
+  if (shoesItem) {
+    ctx.fillStyle = shoesItem.color;
+    ctx.beginPath();
+    ctx.ellipse(x - 9 * scale, y + 26 * scale, 6 * scale, 3.2 * scale, -0.2, 0, Math.PI * 2);
+    ctx.ellipse(x + 9 * scale, y + 26 * scale, 6 * scale, 3.2 * scale, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(x, y - 16 * scale, 8 * scale, 0, Math.PI * 2);
   ctx.fill();
+  if (hatItem) {
+    ctx.fillStyle = hatItem.color;
+    ctx.beginPath();
+    ctx.arc(x, y - 18 * scale, 9 * scale, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 9 * scale, y - 19 * scale, 18 * scale, 4 * scale);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(x, y - 31 * scale);
+    ctx.lineTo(x - 4 * scale, y - 23 * scale);
+    ctx.lineTo(x + 4 * scale, y - 23 * scale);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.roundRect(x - 9 * scale, y - 2 * scale, 18 * scale, 18 * scale, 4 * scale);
   ctx.fill();
+  if (clothesItem) {
+    ctx.fillStyle = clothesItem.color;
+    ctx.beginPath();
+    ctx.roundRect(x - 11 * scale, y - 3 * scale, 22 * scale, 20 * scale, 4 * scale);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.fillRect(x - 5 * scale, y + 1 * scale, 10 * scale, 3 * scale);
+    ctx.fillStyle = clothesItem.color;
+    ctx.beginPath();
+    ctx.arc(x - 14 * scale, y + 5 * scale, 4.5 * scale, 0, Math.PI * 2);
+    ctx.arc(x + 14 * scale, y + 5 * scale, 4.5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  ctx.shadowColor = accent;
+  ctx.shadowColor = weaponAccent;
   ctx.shadowBlur = 8;
-  ctx.strokeStyle = accent;
+  ctx.strokeStyle = weaponAccent;
   ctx.lineWidth = (hasBow ? 2.4 : 3 + pose.strike * 1.4) * scale;
   if (hasBow) {
     const bowRadius = 14 * scale + pose.strike * 3 * scale;
@@ -1009,7 +1054,7 @@ function drawFighter(e, color, scale, accent) {
     ctx.lineTo(handX + Math.cos(aim + 0.9) * bowRadius, handY + Math.sin(aim + 0.9) * bowRadius);
     ctx.stroke();
     if (pose.strike > 0.15) {
-      ctx.strokeStyle = accent;
+      ctx.strokeStyle = weaponAccent;
       ctx.lineWidth = 2 * scale;
       ctx.beginPath();
       ctx.moveTo(handX - e.faceX * 12 * scale, handY - e.faceY * 12 * scale);
@@ -1040,7 +1085,7 @@ function drawFighter(e, color, scale, accent) {
     ctx.fill();
     if (pose.strike > 0.2) {
       ctx.globalAlpha = 0.45 * pose.strike;
-      ctx.strokeStyle = accent;
+      ctx.strokeStyle = weaponAccent;
       ctx.lineWidth = 2.2 * scale;
       ctx.beginPath();
       ctx.arc(punchX + e.faceX * 4 * scale, punchY + e.faceY * 4 * scale, 8 * scale + pose.strike * 5 * scale, 0, Math.PI * 2);
@@ -1050,7 +1095,7 @@ function drawFighter(e, color, scale, accent) {
   }
   ctx.shadowBlur = 0;
   if (!isUnarmed) {
-    ctx.fillStyle = accent;
+    ctx.fillStyle = weaponAccent;
     ctx.beginPath();
     ctx.roundRect(x - 24 * scale, y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
     ctx.fill();
