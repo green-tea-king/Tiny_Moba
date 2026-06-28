@@ -42,10 +42,10 @@ const state = {
 };
 
 const items = [
-  { id: "sword", name: "短劍", cost: 100, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
-  { id: "armor", name: "護甲", cost: 120, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
-  { id: "boots", name: "靴子", cost: 95, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
-  { id: "stone", name: "生命石", cost: 145, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
+  { id: "sword", icon: "劍", color: "#f6e49e", name: "短劍", cost: 100, text: "ATK（攻擊力）+10", apply: p => (p.atk += 10) },
+  { id: "armor", icon: "甲", color: "#9ccdff", name: "護甲", cost: 120, text: "DEF（防禦）+5", apply: p => (p.def += 5) },
+  { id: "boots", icon: "靴", color: "#bdf2a0", name: "靴子", cost: 95, text: "Move Speed（移動速度）+15%", apply: p => (p.speed *= 1.15) },
+  { id: "stone", icon: "心", color: "#ff9aa2", name: "生命石", cost: 145, text: "HP（生命值）上限 +80", apply: p => { p.maxHp += 80; p.hp += 80; } },
 ];
 
 function clamp(value, min, max) {
@@ -875,6 +875,8 @@ function drawHud() {
   ctx.fillStyle = "#9ccdff";
   ctx.fillText(`藍堡 ${Math.max(0, Math.ceil(state.blueBase.hp))}`, W - 14, 50);
 
+  drawInventory(p);
+
   if (state.messageTimer > 0) {
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(0,0,0,0.5)";
@@ -890,6 +892,44 @@ function drawHud() {
   ctx.fillStyle = "rgba(255,255,255,0.72)";
   ctx.font = "700 12px system-ui";
   LANES.forEach(lane => ctx.fillText(`${lane.name}路`, lane.x, FIELD_TOP + 26));
+}
+
+function drawInventory(player) {
+  const slots = 4;
+  const size = 34;
+  const gap = 8;
+  const startX = W / 2 - ((slots * size + (slots - 1) * gap) / 2);
+  const y = FIELD_BOTTOM + 16;
+
+  ctx.textAlign = "center";
+  ctx.font = "800 11px system-ui";
+  ctx.fillStyle = "rgba(255,255,255,0.62)";
+  ctx.fillText("裝備", W / 2, y - 5);
+
+  for (let i = 0; i < slots; i += 1) {
+    const x = startX + i * (size + gap);
+    const item = items.find(entry => entry.id === player.items[i]);
+    ctx.fillStyle = item ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)";
+    ctx.strokeStyle = item ? item.color : "rgba(255,255,255,0.2)";
+    ctx.lineWidth = item ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, 7);
+    ctx.fill();
+    ctx.stroke();
+
+    if (item) {
+      ctx.fillStyle = item.color;
+      ctx.font = "900 15px system-ui";
+      ctx.fillText(item.icon, x + size / 2, y + 22);
+      ctx.fillStyle = "rgba(255,255,255,0.72)";
+      ctx.font = "700 9px system-ui";
+      ctx.fillText(item.name.slice(0, 2), x + size / 2, y + 43);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      ctx.font = "800 15px system-ui";
+      ctx.fillText("+", x + size / 2, y + 22);
+    }
+  }
 }
 
 function drawBar(x, y, w, h, ratio, color) {
@@ -929,6 +969,10 @@ function renderShop() {
 
 function buyItem(item) {
   const p = state.player;
+  if (p.items.length >= 4) {
+    showMessage("裝備欄已滿");
+    return;
+  }
   if (p.gold < item.cost) {
     showMessage("Gold（金錢）不足");
     return;
