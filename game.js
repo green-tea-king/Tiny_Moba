@@ -73,6 +73,30 @@ const items = [
     remove: p => { p.range -= 95; p.atk -= 4; },
   },
   {
+    id: "vampire-sword",
+    slot: "weapon",
+    type: "吸血武器",
+    icon: "血",
+    color: "#ff7a7a",
+    name: "吸血劍",
+    cost: 165,
+    text: "短距離 / ATK（攻擊力）+12 / Lifesteal（吸血）18%",
+    apply: p => { p.atk += 12; p.lifesteal += 0.18; },
+    remove: p => { p.atk -= 12; p.lifesteal -= 0.18; },
+  },
+  {
+    id: "fire-bow",
+    slot: "weapon",
+    type: "燃燒弓",
+    icon: "炎",
+    color: "#ff9a4d",
+    name: "火焰弓",
+    cost: 175,
+    text: "長距離 / Range（攻擊距離）+90 / ATK +5 / 附帶燃燒",
+    apply: p => { p.range += 90; p.atk += 5; p.fireBow = true; },
+    remove: p => { p.range -= 90; p.atk -= 5; p.fireBow = false; },
+  },
+  {
     id: "hat",
     slot: "hat",
     type: "帽子",
@@ -85,16 +109,16 @@ const items = [
     remove: p => { p.maxHp -= 45; p.hp = Math.min(p.hp, p.maxHp); p.def -= 1; },
   },
   {
-    id: "armor",
+    id: "guardian-armor",
     slot: "clothes",
-    type: "衣服",
-    icon: "衣",
+    type: "守護護甲",
+    icon: "盾",
     color: "#9ccdff",
-    name: "戰衣",
-    cost: 120,
-    text: "DEF（防禦）+5",
-    apply: p => (p.def += 5),
-    remove: p => (p.def -= 5),
+    name: "守護甲",
+    cost: 145,
+    text: "DEF（防禦）+6 / 低血量觸發護盾",
+    apply: p => { p.def += 6; p.guardianArmor = true; p.guardianReady = true; },
+    remove: p => { p.def -= 6; p.guardianArmor = false; p.guardianReady = false; p.shield = 0; },
   },
   {
     id: "boots",
@@ -124,6 +148,14 @@ function hasEquipped(entity, itemId) {
   return Object.values(entity.items).includes(itemId);
 }
 
+function hasRangedWeapon(entity) {
+  return hasEquipped(entity, "bow") || hasEquipped(entity, "fire-bow");
+}
+
+function hasMeleeWeapon(entity) {
+  return hasEquipped(entity, "sword") || hasEquipped(entity, "vampire-sword");
+}
+
 function getItem(itemId) {
   return items.find(item => item.id === itemId);
 }
@@ -131,6 +163,10 @@ function getItem(itemId) {
 function getEquippedItem(entity, slotId) {
   if (!entity.items || Array.isArray(entity.items)) return null;
   return getItem(entity.items[slotId]) || null;
+}
+
+function findEntityAny(id) {
+  return state.entities.find(e => e.id === id) || null;
 }
 
 function animRatio(value, max) {
@@ -201,6 +237,14 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
     expNeed: 60,
     gold: 0,
     items: {},
+    lifesteal: 0,
+    fireBow: false,
+    burnTime: 0,
+    burnTick: 0,
+    burnSourceId: null,
+    guardianArmor: false,
+    guardianReady: false,
+    shield: 0,
   };
   return Object.assign(base, stats);
 }
@@ -336,6 +380,7 @@ function update(dt) {
     entity.attackCd = Math.max(0, entity.attackCd - dt);
     entity.attackAnim = Math.max(0, entity.attackAnim - dt);
     entity.hurtAnim = Math.max(0, entity.hurtAnim - dt);
+    updateStatusEffects(entity, dt);
     if (entity.kind === "player") updatePlayer(entity, dt);
     if (entity.kind === "minion") updateMinion(entity, dt);
     if (entity.kind === "hero") updateHero(entity, dt);
@@ -432,6 +477,55 @@ function moveToward(entity, x, y, dt, speed) {
   entity.y += (dy / len) * speed * dt;
 }
 
+function updateStatusEffects(entity, dt) {
+  if (entity.burnTime > 0) {
+    entity.burnTime = Math.max(0, entity.burnTime - dt);
+    entity.burnTick -= dt;
+    if (entity.burnTick <= 0 && entity.hp > 0) {
+      entity.burnTick += 0.45;
+      const source = findEntityAny(entity.burnSourceId) || state.player;
+      dealDamage(source, entity, 4, { isBurn: true, ignoreDefense: true, color: "#ffb26b" });
+      addFloatingText(entity.x, entity.y - entity.radius - 18, "Burn", "#ff9a4d", 0.9);
+    }
+    if (entity.burnTime <= 0) {
+      entity.burnSourceId = null;
+      entity.burnTick = 0;
+    }
+  }
+}
+
+function triggerGuardianShield(entity) {
+  if (!entity.guardianArmor || !entity.guardianReady) return false;
+  entity.guardianReady = false;
+  entity.shield = 42 + entity.level * 8;
+  if (entity.hp <= 0) entity.hp = 1;
+  addFloatingText(entity.x, entity.y - entity.radius - 24, "Shield", "#9ccdff", 1);
+  addHit(entity.x, entity.y, entity.team);
+  return true;
+}
+
+function dealDamage(attacker, target, rawDamage, options = {}) {
+  if (target.dead || target.hp <= 0) return 0;
+  const color = options.color || (attacker.team === "blue" ? "#b9d8ff" : "#ffd0d0");
+  const damage = Math.max(1, Math.round(options.ignoreDefense ? rawDamage : rawDamage - target.def));
+  let remaining = damage;
+  if (target.shield > 0) {
+    const absorbed = Math.min(target.shield, remaining);
+    target.shield -= absorbed;
+    remaining -= absorbed;
+    if (absorbed > 0) addFloatingText(target.x, target.y - target.radius - 24, `Shield -${absorbed}`, "#9ccdff", 0.9);
+  }
+  if (remaining > 0) {
+    target.hp -= remaining;
+    addFloatingText(target.x, target.y - target.radius - 12, `-${remaining}`, color);
+  } else {
+    addFloatingText(target.x, target.y - target.radius - 12, "Block", "#9ccdff", 0.9);
+  }
+  if (!options.isBurn && target.guardianReady && (target.hp / target.maxHp <= 0.35 || target.hp <= 0)) triggerGuardianShield(target);
+  if (target.hp <= 0) kill(target, attacker);
+  return damage;
+}
+
 function attack(attacker, target) {
   if (attacker.attackCd > 0 || target.dead || target.hp <= 0) return false;
   const dx = target.x - attacker.x;
@@ -443,13 +537,20 @@ function attack(attacker, target) {
   target.hitY = dy / len;
   attacker.attackAnim = attacker.attackAnimMax;
   target.hurtAnim = target.hurtAnimMax;
-  const damage = Math.max(1, Math.round(attacker.atk - target.def));
-  target.hp -= damage;
+  const damage = dealDamage(attacker, target, attacker.atk);
   attacker.attackCd = attacker.attackRate;
   addAttackEffect(attacker, target);
   addHit(target.x, target.y, attacker.team);
-  addFloatingText(target.x, target.y - target.radius - 12, `-${damage}`, attacker.team === "blue" ? "#b9d8ff" : "#ffd0d0");
-  if (target.hp <= 0) kill(target, attacker);
+  if (attacker.kind === "player" && attacker.lifesteal > 0 && damage > 0) {
+    const heal = Math.max(1, Math.round(damage * attacker.lifesteal));
+    attacker.hp = Math.min(attacker.maxHp, attacker.hp + heal);
+    addFloatingText(attacker.x, attacker.y - attacker.radius - 20, `+${heal}`, "#8ff0b2", 0.9);
+  }
+  if (attacker.kind === "player" && attacker.fireBow) {
+    target.burnTime = 2.6;
+    target.burnTick = Math.min(target.burnTick || 0, 0.18);
+    target.burnSourceId = attacker.id;
+  }
   return true;
 }
 
@@ -514,6 +615,10 @@ function kill(target, killer) {
     target.attackCd = 0;
     target.attackAnim = 0;
     target.hurtAnim = 0;
+    target.shield = 0;
+    target.burnTime = 0;
+    target.burnTick = 0;
+    target.burnSourceId = null;
     state.input.x = 0;
     state.input.y = 0;
     resetStick();
@@ -545,6 +650,10 @@ function levelUp() {
 function respawnHero(hero) {
   hero.dead = false;
   hero.hp = hero.maxHp;
+  hero.shield = 0;
+  hero.burnTime = 0;
+  hero.burnTick = 0;
+  hero.burnSourceId = null;
   hero.x = LANES[hero.laneIndex].x;
   hero.y = hero.team === "blue" ? 628 : 92;
 }
@@ -552,6 +661,11 @@ function respawnHero(hero) {
 function respawnPlayer(player) {
   player.dead = false;
   player.hp = player.maxHp;
+  player.shield = 0;
+  player.burnTime = 0;
+  player.burnTick = 0;
+  player.burnSourceId = null;
+  player.guardianReady = player.guardianArmor;
   player.x = W / 2;
   player.y = 636;
   player.attackCd = 0;
@@ -580,8 +694,8 @@ function addAttackEffect(attacker, target) {
   const dx = target.x - attacker.x;
   const dy = target.y - attacker.y;
   const angle = Math.atan2(dy, dx);
-  const hasBow = attacker.kind === "player" && hasEquipped(attacker, "bow");
-  const hasSword = attacker.kind === "player" && hasEquipped(attacker, "sword");
+  const hasBow = attacker.kind === "player" && hasRangedWeapon(attacker);
+  const hasSword = attacker.kind === "player" && hasMeleeWeapon(attacker);
   const kind = attacker.kind === "tower" ? "beam" : hasBow ? "arrow" : attacker.kind === "player" && !hasSword ? "punch" : attacker.kind === "minion" ? "stab" : "slash";
   state.effects.push({
     type: kind,
@@ -1019,8 +1133,8 @@ function drawFighter(e, color, scale, accent) {
   const pose = getMotionPose(e, 6, 1.2, 10 * scale, 6 * scale);
   const x = pose.x;
   const y = pose.y;
-  const hasBow = e.kind === "player" && hasEquipped(e, "bow");
-  const hasSword = e.kind !== "player" || hasEquipped(e, "sword");
+  const hasBow = e.kind === "player" && hasRangedWeapon(e);
+  const hasSword = e.kind !== "player" || hasMeleeWeapon(e);
   const isUnarmed = e.kind === "player" && !hasBow && !hasSword;
   const weaponItem = e.kind === "player" ? getEquippedItem(e, "weapon") : null;
   const hatItem = e.kind === "player" ? getEquippedItem(e, "hat") : null;
@@ -1221,7 +1335,8 @@ function drawHud() {
   ctx.textAlign = "left";
   const hpText = p.dead ? `Respawn ${Math.ceil(p.respawn)}s` : `HP ${Math.ceil(p.hp)}/${p.maxHp}`;
   ctx.fillText(`Lv.${p.level}  ${hpText}`, 14, 24);
-  ctx.fillText(`Gold ${p.gold}  ATK ${p.atk}  DEF ${p.def}`, 14, 50);
+  const shieldText = p.shield > 0 ? `  SHD ${Math.ceil(p.shield)}` : "";
+  ctx.fillText(`Gold ${p.gold}  ATK ${p.atk}  DEF ${p.def}${shieldText}`, 14, 50);
 
   drawBar(190, 16, 84, 9, p.dead ? 0 : p.hp / p.maxHp, p.dead ? "#ff8085" : "#65aefb");
   drawBar(190, 38, 84, 9, p.exp / p.expNeed, GOLD);
