@@ -34,8 +34,10 @@ const state = {
   input: { x: 0, y: 0 },
   entities: [],
   particles: [],
+  effects: [],
   texts: [],
   targetHint: null,
+  shake: 0,
   nextId: 1,
 };
 
@@ -88,8 +90,10 @@ function makeEntity(kind, team, laneIndex, x, y, stats = {}) {
 function init() {
   state.entities = [];
   state.particles = [];
+  state.effects = [];
   state.texts = [];
   state.targetHint = null;
+  state.shake = 0;
   state.nextId = 1;
   state.gameOver = false;
   state.winner = null;
@@ -198,6 +202,7 @@ function update(dt) {
   state.time += dt;
   state.waveTimer += dt;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
+  state.shake = Math.max(0, state.shake - dt * 22);
 
   updatePlayerTargetHint();
 
@@ -224,6 +229,10 @@ function update(dt) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     return p.life > 0;
+  });
+  state.effects = state.effects.filter(effect => {
+    effect.life -= dt;
+    return effect.life > 0;
   });
   state.texts = state.texts.filter(t => {
     t.life -= dt;
@@ -309,8 +318,10 @@ function attack(attacker, target) {
   const damage = Math.max(1, Math.round(attacker.atk - target.def));
   target.hp -= damage;
   attacker.attackCd = attacker.attackRate;
+  addAttackEffect(attacker, target);
   addHit(target.x, target.y, attacker.team);
   addFloatingText(target.x, target.y - target.radius - 12, `-${damage}`, attacker.team === "blue" ? "#b9d8ff" : "#ffd0d0");
+  state.shake = Math.max(state.shake, attacker.kind === "tower" ? 3.8 : attacker.kind === "player" ? 2.4 : 1.4);
   if (target.hp <= 0) kill(target, attacker);
   return true;
 }
@@ -394,7 +405,33 @@ function endGame(winner) {
 }
 
 function addHit(x, y, team) {
-  state.particles.push({ x, y, vx: 0, vy: -18, life: 0.22, color: team === "blue" ? "#b9d8ff" : "#ffd0d0", r: 8 });
+  const color = team === "blue" ? "#b9d8ff" : "#ffd0d0";
+  state.particles.push({ x, y, vx: 0, vy: -18, life: 0.25, color, r: 9, type: "ring" });
+  for (let i = 0; i < 5; i += 1) {
+    const a = Math.PI * 2 * (i / 5) + state.time;
+    state.particles.push({ x, y, vx: Math.cos(a) * 34, vy: Math.sin(a) * 34, life: 0.28, color, r: 2.6, type: "spark" });
+  }
+}
+
+function addAttackEffect(attacker, target) {
+  const color = attacker.team === "blue" ? "#8fc7ff" : "#ff858a";
+  const dx = target.x - attacker.x;
+  const dy = target.y - attacker.y;
+  const angle = Math.atan2(dy, dx);
+  const kind = attacker.kind === "tower" ? "beam" : attacker.kind === "minion" ? "stab" : "slash";
+  state.effects.push({
+    type: kind,
+    team: attacker.team,
+    x1: attacker.x,
+    y1: attacker.y,
+    x2: target.x,
+    y2: target.y,
+    angle,
+    color,
+    life: kind === "beam" ? 0.22 : 0.18,
+    duration: kind === "beam" ? 0.22 : 0.18,
+    width: attacker.kind === "tower" ? 7 : attacker.kind === "player" ? 6 : 4,
+  });
 }
 
 function addFloatingText(x, y, text, color, scale = 1) {
@@ -402,22 +439,31 @@ function addFloatingText(x, y, text, color, scale = 1) {
 }
 
 function addBurst(x, y, color) {
-  for (let i = 0; i < 8; i += 1) {
-    const a = (Math.PI * 2 * i) / 8;
-    state.particles.push({ x, y, vx: Math.cos(a) * 42, vy: Math.sin(a) * 42, life: 0.45, color, r: 4 });
+  for (let i = 0; i < 14; i += 1) {
+    const a = (Math.PI * 2 * i) / 14;
+    const speed = i % 2 === 0 ? 58 : 34;
+    state.particles.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 0.52, color, r: i % 2 === 0 ? 4 : 2.5, type: "spark" });
   }
 }
 
 function draw() {
   ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  if (state.shake > 0) {
+    const sx = Math.sin(state.time * 91) * state.shake;
+    const sy = Math.cos(state.time * 73) * state.shake;
+    ctx.translate(sx, sy);
+  }
   drawMap();
   const sorted = [...state.entities].sort((a, b) => a.y - b.y);
   drawTargetHint();
   for (const entity of sorted) {
     if (!entity.dead) drawEntity(entity);
   }
+  drawAttackEffects();
   drawParticles();
   drawFloatingTexts();
+  ctx.restore();
   drawHud();
   if (state.gameOver) drawGameOver();
 }
@@ -441,18 +487,74 @@ function drawTargetHint() {
   ctx.stroke();
 }
 
+function drawAttackEffects() {
+  for (const effect of state.effects) {
+    const t = 1 - effect.life / effect.duration;
+    const alpha = clamp(effect.life / effect.duration, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (effect.type === "beam") {
+      const grad = ctx.createLinearGradient(effect.x1, effect.y1, effect.x2, effect.y2);
+      grad.addColorStop(0, effect.color);
+      grad.addColorStop(0.5, "#ffffff");
+      grad.addColorStop(1, effect.color);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = effect.width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(effect.x1, effect.y1 - 8);
+      ctx.lineTo(effect.x2, effect.y2);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(effect.x1, effect.y1 - 8);
+      ctx.lineTo(effect.x2, effect.y2);
+      ctx.stroke();
+    } else if (effect.type === "slash") {
+      ctx.translate(effect.x2, effect.y2);
+      ctx.rotate(effect.angle + Math.PI / 2);
+      ctx.strokeStyle = effect.color;
+      ctx.lineWidth = effect.width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(0, 0, 24 + t * 10, -1.1, 1.1);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.75)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 17 + t * 7, -0.8, 0.8);
+      ctx.stroke();
+    } else {
+      const mx = effect.x1 + (effect.x2 - effect.x1) * t;
+      const my = effect.y1 + (effect.y2 - effect.y1) * t;
+      ctx.strokeStyle = effect.color;
+      ctx.lineWidth = effect.width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(effect.x1, effect.y1);
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 function drawMap() {
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
 
   const grad = ctx.createLinearGradient(0, FIELD_TOP, 0, FIELD_BOTTOM);
-  grad.addColorStop(0, "#20382b");
-  grad.addColorStop(1, "#2d412e");
+  grad.addColorStop(0, "#1e3329");
+  grad.addColorStop(0.5, "#2a4230");
+  grad.addColorStop(1, "#20382d");
   ctx.fillStyle = grad;
   ctx.fillRect(0, FIELD_TOP, W, FIELD_BOTTOM - FIELD_TOP);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.lineWidth = 16;
+  drawGrassTexture();
+
+  ctx.strokeStyle = "rgba(15,22,18,0.42)";
+  ctx.lineWidth = 26;
   ctx.lineCap = "round";
   LANES.forEach(lane => {
     ctx.beginPath();
@@ -461,7 +563,27 @@ function drawMap() {
     ctx.stroke();
   });
 
-  ctx.strokeStyle = "rgba(235,220,170,0.18)";
+  ctx.strokeStyle = "rgba(215,225,198,0.18)";
+  ctx.lineWidth = 18;
+  LANES.forEach(lane => {
+    ctx.beginPath();
+    ctx.moveTo(lane.x, FIELD_TOP + 10);
+    ctx.lineTo(lane.x, FIELD_BOTTOM - 10);
+    ctx.stroke();
+  });
+
+  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.lineWidth = 2;
+  LANES.forEach(lane => {
+    ctx.beginPath();
+    ctx.moveTo(lane.x - 13, FIELD_TOP + 22);
+    ctx.lineTo(lane.x - 13, FIELD_BOTTOM - 22);
+    ctx.moveTo(lane.x + 13, FIELD_TOP + 22);
+    ctx.lineTo(lane.x + 13, FIELD_BOTTOM - 22);
+    ctx.stroke();
+  });
+
+  ctx.strokeStyle = "rgba(246,228,158,0.2)";
   ctx.lineWidth = 2;
   for (let y = 180; y <= 520; y += 88) {
     ctx.beginPath();
@@ -470,8 +592,30 @@ function drawMap() {
     ctx.stroke();
   }
 
+  ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  ctx.setLineDash([10, 10]);
+  ctx.beginPath();
+  ctx.moveTo(32, 356);
+  ctx.lineTo(W - 32, 356);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
   drawBasePad(W / 2, 44, RED, "紅方主堡");
   drawBasePad(W / 2, 704, BLUE, "藍方主堡");
+}
+
+function drawGrassTexture() {
+  for (let i = 0; i < 85; i += 1) {
+    const x = (i * 47) % W;
+    const y = FIELD_TOP + ((i * 83) % (FIELD_BOTTOM - FIELD_TOP));
+    const alpha = 0.05 + ((i % 5) * 0.014);
+    ctx.strokeStyle = `rgba(180,220,170,${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 5 + (i % 3), y - 5);
+    ctx.stroke();
+  }
 }
 
 function drawBasePad(x, y, color, label) {
@@ -502,9 +646,15 @@ function drawEntity(e) {
 }
 
 function drawTower(e, color) {
+  const pulse = 0.5 + Math.sin(state.time * 3 + e.id) * 0.5;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
   ctx.ellipse(e.x, e.y + 24, 23, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = e.team === "blue" ? `rgba(80,160,255,${0.1 + pulse * 0.08})` : `rgba(255,90,100,${0.1 + pulse * 0.08})`;
+  ctx.beginPath();
+  ctx.arc(e.x, e.y + 4, 36 + pulse * 5, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = color;
@@ -528,6 +678,12 @@ function drawTower(e, color) {
 }
 
 function drawCastle(e, color) {
+  const pulse = 0.5 + Math.sin(state.time * 2 + e.id) * 0.5;
+  ctx.fillStyle = e.team === "blue" ? `rgba(80,160,255,${0.12 + pulse * 0.08})` : `rgba(255,90,100,${0.12 + pulse * 0.08})`;
+  ctx.beginPath();
+  ctx.ellipse(e.x, e.y + 10, 70 + pulse * 8, 38 + pulse * 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.roundRect(e.x - 30, e.y - 20, 60, 46, 6);
@@ -550,36 +706,39 @@ function drawCastle(e, color) {
 
 function drawMinion(e, color) {
   const dir = e.team === "blue" ? -1 : 1;
+  const bob = Math.sin(state.time * 8 + e.id) * 1.6;
+  const x = e.x;
+  const y = e.y + bob;
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
-  ctx.ellipse(e.x, e.y + 11, 11, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, e.y + 11, 11, 4, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.strokeStyle = "#f1f6ff";
   ctx.lineWidth = 2.4;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(e.x, e.y - 2);
-  ctx.lineTo(e.x, e.y + 8);
-  ctx.moveTo(e.x, e.y + 2);
-  ctx.lineTo(e.x - 8, e.y + 7);
-  ctx.moveTo(e.x, e.y + 8);
-  ctx.lineTo(e.x - 5, e.y + 15);
-  ctx.moveTo(e.x, e.y + 8);
-  ctx.lineTo(e.x + 5, e.y + 15);
+  ctx.moveTo(x, y - 2);
+  ctx.lineTo(x, y + 8);
+  ctx.moveTo(x, y + 2);
+  ctx.lineTo(x - 8, y + 7);
+  ctx.moveTo(x, y + 8);
+  ctx.lineTo(x - 5, y + 15);
+  ctx.moveTo(x, y + 8);
+  ctx.lineTo(x + 5, y + 15);
   ctx.stroke();
 
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(e.x, e.y - 8, 6, 0, Math.PI * 2);
+  ctx.arc(x, y - 8, 6, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#f8fbff";
-  ctx.fillRect(e.x - 5, e.y - 2, 10, 8);
+  ctx.fillRect(x - 5, y - 2, 10, 8);
   ctx.strokeStyle = "#f6e49e";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(e.x + 7, e.y + 3);
-  ctx.lineTo(e.x + 15, e.y + 3 + dir * 5);
+  ctx.moveTo(x + 7, y + 3);
+  ctx.lineTo(x + 15, y + 3 + dir * 5);
   ctx.stroke();
 }
 
@@ -589,11 +748,12 @@ function drawHero(e, color) {
 
 function drawPlayer(e, color) {
   drawFighter(e, color, 1.16, "#ffffff");
+  const bob = Math.sin(state.time * 6 + e.id) * 1.2;
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.moveTo(e.x - 8, e.y - 23);
-  ctx.lineTo(e.x, e.y - 31);
-  ctx.lineTo(e.x + 8, e.y - 23);
+  ctx.moveTo(e.x - 8, e.y + bob - 23);
+  ctx.lineTo(e.x, e.y + bob - 31);
+  ctx.lineTo(e.x + 8, e.y + bob - 23);
   ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = "#b9d8ff";
@@ -605,43 +765,49 @@ function drawPlayer(e, color) {
 
 function drawFighter(e, color, scale, accent) {
   const dir = e.team === "blue" ? -1 : 1;
+  const bob = Math.sin(state.time * 6 + e.id) * 1.2;
+  const x = e.x;
+  const y = e.y + bob;
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.beginPath();
-  ctx.ellipse(e.x, e.y + 17 * scale, 16 * scale, 5 * scale, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, e.y + 17 * scale, 16 * scale, 5 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.strokeStyle = "#f1f6ff";
   ctx.lineWidth = 3.2 * scale;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(e.x, e.y - 4 * scale);
-  ctx.lineTo(e.x, e.y + 12 * scale);
-  ctx.moveTo(e.x, e.y + 1 * scale);
-  ctx.lineTo(e.x - 14 * scale, e.y + 8 * scale);
-  ctx.moveTo(e.x, e.y + 12 * scale);
-  ctx.lineTo(e.x - 8 * scale, e.y + 25 * scale);
-  ctx.moveTo(e.x, e.y + 12 * scale);
-  ctx.lineTo(e.x + 8 * scale, e.y + 25 * scale);
+  ctx.moveTo(x, y - 4 * scale);
+  ctx.lineTo(x, y + 12 * scale);
+  ctx.moveTo(x, y + 1 * scale);
+  ctx.lineTo(x - 14 * scale, y + 8 * scale);
+  ctx.moveTo(x, y + 12 * scale);
+  ctx.lineTo(x - 8 * scale, y + 25 * scale);
+  ctx.moveTo(x, y + 12 * scale);
+  ctx.lineTo(x + 8 * scale, y + 25 * scale);
   ctx.stroke();
 
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(e.x, e.y - 16 * scale, 8 * scale, 0, Math.PI * 2);
+  ctx.arc(x, y - 16 * scale, 8 * scale, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.roundRect(e.x - 9 * scale, e.y - 2 * scale, 18 * scale, 18 * scale, 4 * scale);
+  ctx.roundRect(x - 9 * scale, y - 2 * scale, 18 * scale, 18 * scale, 4 * scale);
   ctx.fill();
 
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 8;
   ctx.strokeStyle = accent;
   ctx.lineWidth = 3 * scale;
   ctx.beginPath();
-  ctx.moveTo(e.x + 10 * scale, e.y + 1 * scale);
-  ctx.lineTo(e.x + 23 * scale, e.y - 10 * dir * scale);
+  ctx.moveTo(x + 10 * scale, y + 1 * scale);
+  ctx.lineTo(x + 23 * scale, y - 10 * dir * scale);
   ctx.stroke();
+  ctx.shadowBlur = 0;
   ctx.fillStyle = accent;
   ctx.beginPath();
-  ctx.roundRect(e.x - 24 * scale, e.y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
+  ctx.roundRect(x - 24 * scale, y + 2 * scale, 10 * scale, 16 * scale, 4 * scale);
   ctx.fill();
 }
 
@@ -659,9 +825,17 @@ function drawParticles() {
   for (const p of state.particles) {
     ctx.globalAlpha = clamp(p.life * 2.4, 0, 1);
     ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    if (p.type === "ring") {
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r + (0.28 - p.life) * 34, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
